@@ -1,0 +1,154 @@
+{
+  "buildTime": "2026-05-24T15:41:45.779Z",
+  "sources": [
+    {
+      "id": "QiScans",
+      "name": "QiScans",
+      "author": "real",
+      "desc": "Extension that pulls series from https://qimanhwa.com",
+      "website": "https://github.com/shadorig/real-extensions",
+      "contentRating": "MATURE",
+      "version": "1.0.0",
+      "icon": "icon.png",
+      "tags": [],
+      "websiteBaseURL": "https://qimanhwa.com",
+      "intents": 53
+    },
+    {
+      "id": "ElfToon",
+      "name": "ElfToon",
+      "author": "real",
+      "desc": "Extension that pulls series from https://elftoon.com",
+      "website": "https://github.com/shadorig/real-extensions",
+      "contentRating": "MATURE",
+      "version": "1.0.0",
+      "icon": "icon.png",
+      "tags": [],
+      "websiteBaseURL": "https://elftoon.com",
+      "intents": 53
+    },
+    {
+      "id": "HiveToon",
+      "name": "HiveToon",
+      "author": "real",
+      "desc": "Extension that pulls series from https://hivetoons.org",
+      "website": "https://github.com/shadorig/real-extensions",
+      "contentRating": "MATURE",
+      "version": "1.0.1",
+      "icon": "icon.png",
+      "tags": [],
+      "websiteBaseURL": "https://hivetoons.org",
+      "intents": 53
+    },
+    {
+      "id": "MadaraScans",
+      "name": "MadaraScans",
+      "author": "real",
+      "desc": "Extension that pulls series from https://madarascans.com",
+      "website": "https://github.com/shadorig/real-extensions",
+      "contentRating": "MATURE",
+      "version": "1.0.0",
+      "icon": "icon.png",
+      "tags": [],
+      "websiteBaseURL": "https://madarascans.com",
+      "intents": 53
+    },
+    {
+      "id": "VortexScans",
+      "name": "VortexScans",
+      "author": "real",
+      "desc": "Extension that pulls series from https://vortexscans.org",
+      "website": "https://github.com/shadorig/real-extensions",
+      "contentRating": "MATURE",
+      "version": "1.0.0",
+      "icon": "icon.png",
+      "tags": [],
+      "websiteBaseURL": "https://vortexscans.org",
+      "intents": 53
+    },
+    {
+      "id": "GenzToon",
+      "name": "GenzToon",
+      "author": "real",
+      "desc": "Extension that pulls series from https://genzupdates.com",
+      "website": "https://github.com/shadorig/real-extensions",
+      "contentRating": "MATURE",
+      "version": "1.0.0",
+      "icon": "icon.png",
+      "tags": [],
+      "websiteBaseURL": "https://genzupdates.com",
+      "intents": 53
+    },
+    {
+      "id": "ComixTo",
+      "name": "ComixTo",
+      "author": "real",
+      "desc": "Extension that pulls series from https://comix.to",
+      "website": "https://github.com/shadorig/real-extensions",
+      "contentRating": "MATURE",
+      "version": "1.0.9",
+      "icon": "icon.png",
+      "tags": [],
+      "websiteBaseURL": "https://comix.to",
+      "intents": 53
+    },
+    {
+      "id": "ComicLand",
+      "name": "ComicLand",
+      "author": "real",
+      "desc": "Extension that pulls series from https://comicland.org",
+      "website": "https://github.com/shadorig/real-extensions",
+      "contentRating": "MATURE",
+      "version": "1.0.0",
+      "icon": "icon.png",
+      "tags": [
+        {
+          "text": "18+",
+          "type": "warning"
+        }
+      ],
+      "websiteBaseURL": "https://comicland.org",
+      "intents": 53
+    },
+    {
+      "id": "ErisScans",
+      "name": "ErisScans",
+      "author": "real",
+      "desc": "Extension that pulls series from https://erisscans.com",
+      "website": "https://github.com/shadorig/real-extensions",
+      "contentRating": "MATURE",
+      "version": "1.0.0",
+      "icon": "icon.png",
+      "tags": [
+        {
+          "text": "18+",
+          "type": "warning"
+        }
+      ],
+      "websiteBaseURL": "https://erisscans.com",
+      "intents": 53
+    },
+    {
+      "id": "DivaScans",
+      "name": "DivaScans",
+      "author": "real",
+      "desc": "Extension that pulls series from https://divatoon.com",
+      "website": "https://github.com/shadorig/real-extensions",
+      "contentRating": "MATURE",
+      "version": "1.0.0",
+      "icon": "icon.png",
+      "tags": [
+        {
+          "text": "18+",
+          "type": "warning"
+        }
+      ],
+      "websiteBaseURL": "https://divatoon.com",
+      "intents": 53
+    }
+  ],
+  "builtWith": {
+    "toolchain": "0.8.7",
+    "types": "0.8.7"
+  }
+}
