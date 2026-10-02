@@ -14,12 +14,15 @@
   var HOME_PAGE_SIZE = 20;
   var SEARCH_PAGE_SIZE = 20;
   var SECTION_ID_NEWEST = "newest";
+  var SECTION_ID_POPULAR = "popular";
+  var SECTION_ID_OFFICIAL = "official";
   var SECTION_ID_UNCENSORED = "uncensored";
   var SECTION_ID_RECOMMENDED = "recommended";
   var TAG_PREFIX_GENRE = "genre:";
   var TAG_PREFIX_AUTHOR = "author:";
   var TAG_PREFIX_ARTIST = "artist:";
   var STATE_SHOW_LATEST_CHAPTER_SUBTITLES = "show_latest_chapter_subtitles";
+  var CARD_SUBTITLE_BATCH_SIZE = 4;
   var GENRE_LABEL_OVERRIDES = {
     "sci fi": "Sci-Fi"
   };
@@ -27,7 +30,7 @@
   // Source Info
 
   var ComicLandInfo = {
-    version: "1.0.0",
+    version: "1.1.0",
     name: "ComicLand",
     description: "Extension that pulls series from " + DOMAIN,
     author: "real",
@@ -47,7 +50,6 @@
 
   function ComicLand() {
     this.cachedSeriesDetailsPromises = {};
-    this.cachedSeriesCardSubtitlePromises = {};
     this.stateManager = App.createSourceStateManager();
     this.requestManager = App.createRequestManager({
       requestsPerSecond: 4,
@@ -91,21 +93,24 @@
   };
 
   ComicLand.prototype.getHomePageSections = async function(sectionCallback) {
-    var results = await Promise.all([
-      this.getNewestSectionItems(1),
-      this.getUncensoredSectionItems(1),
-      this.getRecommendedSectionItems(1)
-    ]);
+    var sectionTasks = [
+      { id: SECTION_ID_NEWEST, title: "Newest", load: this.getNewestSectionItems(1) },
+      { id: SECTION_ID_POPULAR, title: "Popular", load: this.getPopularSectionItems() },
+      { id: SECTION_ID_OFFICIAL, title: "Official", load: this.getOfficialSectionItems(1) },
+      { id: SECTION_ID_UNCENSORED, title: "Uncensored", load: this.getUncensoredSectionItems(1) },
+      { id: SECTION_ID_RECOMMENDED, title: "Recommended", load: this.getRecommendedSectionItems(1) }
+    ];
 
-    [
-      createHomeSection(SECTION_ID_NEWEST, "Newest", results[0]),
-      createHomeSection(SECTION_ID_UNCENSORED, "Uncensored", results[1]),
-      createHomeSection(SECTION_ID_RECOMMENDED, "Recommended", results[2])
-    ].forEach(function(section) {
-      if (Array.isArray(section.items) && section.items.length > 0) {
-        sectionCallback(section);
+    await Promise.all(sectionTasks.map(async function(task) {
+      try {
+        var section = createHomeSection(task.id, task.title, await task.load);
+        if (Array.isArray(section.items) && section.items.length > 0) {
+          sectionCallback(section);
+        }
+      } catch (error) {
+        // A single home feed should not prevent the remaining live feeds from loading.
       }
-    });
+    }));
   };
 
   ComicLand.prototype.getViewMoreItems = async function(homepageSectionId, metadata) {
@@ -113,6 +118,14 @@
 
     if (homepageSectionId === SECTION_ID_NEWEST) {
       return this.getNewestSectionItems(page);
+    }
+
+    if (homepageSectionId === SECTION_ID_POPULAR) {
+      return page === 1 ? this.getPopularSectionItems() : App.createPagedResults({ results: [] });
+    }
+
+    if (homepageSectionId === SECTION_ID_OFFICIAL) {
+      return this.getOfficialSectionItems(page);
     }
 
     if (homepageSectionId === SECTION_ID_UNCENSORED) {
@@ -160,6 +173,10 @@
         ];
       }
     });
+  };
+
+  ComicLand.prototype.supportsTagExclusion = async function() {
+    return false;
   };
 
   ComicLand.prototype.getMangaDetails = async function(seriesId) {
@@ -251,6 +268,16 @@
     return createPagedSeriesResults(this, pageData.items, pageData.hasMore, page);
   };
 
+  ComicLand.prototype.getPopularSectionItems = async function() {
+    var pageData = await this.fetchPopularPage();
+    return createPagedSeriesResults(this, pageData.items, false, 1);
+  };
+
+  ComicLand.prototype.getOfficialSectionItems = async function(page) {
+    var pageData = await this.fetchOfficialPage(page);
+    return createPagedSeriesResults(this, pageData.items, pageData.hasMore, page);
+  };
+
   ComicLand.prototype.getUncensoredSectionItems = async function(page) {
     var pageData = await this.fetchUncensoredPage(page);
     return createPagedSeriesResults(this, pageData.items, pageData.hasMore, page);
@@ -276,6 +303,26 @@
     }), "list", HOME_PAGE_SIZE);
   };
 
+  ComicLand.prototype.fetchPopularPage = async function() {
+    return this.fetchSeriesListPage(buildApiUrl("/comics/popular"), "list", Number.MAX_SAFE_INTEGER);
+  };
+
+  ComicLand.prototype.fetchOfficialPage = async function(page) {
+    var payload = extractApiData(
+      await this.fetchJson(buildApiUrl("/comics/official", {
+        offset: pageOffset(page, HOME_PAGE_SIZE),
+        limit: HOME_PAGE_SIZE
+      })),
+      "/comics/official"
+    );
+    var items = Array.isArray(payload && payload.items) ? payload.items : [];
+
+    return {
+      items: items,
+      hasMore: getHasMore(payload, items, HOME_PAGE_SIZE, HOME_PAGE_SIZE)
+    };
+  };
+
   ComicLand.prototype.fetchUncensoredPage = async function(page) {
     return this.fetchSearchPage("uncensored", page, HOME_PAGE_SIZE);
   };
@@ -293,7 +340,7 @@
 
     return {
       items: items,
-      hasMore: payload && payload.has_more === true || items.length >= toPositiveInteger(pageSize, SEARCH_PAGE_SIZE)
+      hasMore: getHasMore(payload, items, pageSize, SEARCH_PAGE_SIZE)
     };
   };
 
@@ -365,11 +412,13 @@
       }.bind(this))();
     }
 
+    var request = this.cachedSeriesDetailsPromises[cacheKey];
     try {
-      return await this.cachedSeriesDetailsPromises[cacheKey];
-    } catch (error) {
-      delete this.cachedSeriesDetailsPromises[cacheKey];
-      throw error;
+      return await request;
+    } finally {
+      if (this.cachedSeriesDetailsPromises[cacheKey] === request) {
+        delete this.cachedSeriesDetailsPromises[cacheKey];
+      }
     }
   };
 
@@ -382,16 +431,11 @@
       return subtitle;
     }
 
-    if (!this.cachedSeriesCardSubtitlePromises[cacheKey]) {
-      this.cachedSeriesCardSubtitlePromises[cacheKey] = this.fetchSeriesDetails(slug).then(function(details) {
-        return buildSeriesSubtitle(details, true);
-      }).catch(function() {
-        delete this.cachedSeriesCardSubtitlePromises[cacheKey];
-        return buildLegacySeriesSubtitle(item);
-      }.bind(this));
+    try {
+      return buildSeriesSubtitle(await this.fetchSeriesDetails(slug), true);
+    } catch (error) {
+      return buildLegacySeriesSubtitle(item);
     }
-
-    return this.cachedSeriesCardSubtitlePromises[cacheKey];
   };
 
   ComicLand.prototype.fetchChapterPages = async function(seriesId, chapterId) {
@@ -487,9 +531,24 @@
   }
 
   async function mapSeriesItems(source, items, showLatestChapterSubtitles) {
-    return Promise.all(normalizeSeriesItems(items).map(async function(item) {
-      return createPartialSeries(item, await source.getSeriesCardSubtitle(item, showLatestChapterSubtitles));
-    }));
+    var normalizedItems = normalizeSeriesItems(items);
+
+    if (showLatestChapterSubtitles !== true) {
+      return normalizedItems.map(function(item) {
+        return createPartialSeries(item, buildLegacySeriesSubtitle(item));
+      });
+    }
+
+    var results = [];
+    for (var start = 0; start < normalizedItems.length; start += CARD_SUBTITLE_BATCH_SIZE) {
+      var batch = normalizedItems.slice(start, start + CARD_SUBTITLE_BATCH_SIZE);
+      var mappedBatch = await Promise.all(batch.map(async function(item) {
+        return createPartialSeries(item, await source.getSeriesCardSubtitle(item, true));
+      }));
+      results = results.concat(mappedBatch);
+    }
+
+    return results;
   }
 
   async function createPagedSeriesResults(source, items, hasMore, page) {
@@ -854,6 +913,14 @@
 
   function pageOffset(page, pageSize) {
     return Math.max(0, (toPositiveInteger(page, 1) - 1) * toPositiveInteger(pageSize, HOME_PAGE_SIZE));
+  }
+
+  function getHasMore(payload, items, pageSize, fallbackPageSize) {
+    if (payload && typeof payload.has_more === "boolean") {
+      return payload.has_more;
+    }
+
+    return (Array.isArray(items) ? items.length : 0) >= toPositiveInteger(pageSize, fallbackPageSize);
   }
 
   function formatRequestLabel(url) {
