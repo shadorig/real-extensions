@@ -1,0 +1,16 @@
+# Local debug and inspection artifacts
+archive/
+debug/
+debug/examples/
+reference/*
+!reference/baseline-example/
+reference/baseline-example/*
+!reference/baseline-example/README.md
+!reference/baseline-example/source.js
+scripts/*
+!scripts/check-version-sync.cjs
+.playwright-mcp/
+.tmp-*/
+tmp-*/
+tmp-*
+.local/
