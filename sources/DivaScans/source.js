@@ -3,82 +3,79 @@
 (function() {
   // Constants
 
-  var DOMAIN = "https://divatoon.com";
-  var API_BASE = "https://api.divatoon.com/api";
+  var DOMAIN = "https://divascans.org";
+  var AI_API_BASE = DOMAIN + "/api/ai";
+  var BROWSE_API = DOMAIN + "/api/series";
+  var FACETS_API = DOMAIN + "/api/series/facets";
   var SOURCE_INTENTS_SERIES_CHAPTERS = 1;
   var SOURCE_INTENTS_HOMEPAGE_SECTIONS = 4;
   var SOURCE_INTENTS_CLOUDFLARE_BYPASS_REQUIRED = 16;
   var SOURCE_INTENTS_SETTINGS_UI = 32;
   var BADGE_COLOR_WARNING = "warning";
   var CONTENT_RATING_MATURE = "MATURE";
-  var BROWSE_PER_PAGE = 300;
-  var SEARCH_PER_PAGE = 24;
-  var HOME_FEATURED_PER_PAGE = 12;
-  var HOME_POPULAR_PER_PAGE = 12;
-  var HOME_MOST_POPULAR_PER_PAGE = 12;
-  var HOME_LATEST_PER_PAGE = 24;
-  var HOME_LATEST_UPDATES_PER_PAGE = 24;
-  var CHAPTERS_PER_REQUEST = 500;
-  var ARCHIVE_DEFAULT_SERIES_TYPES = "MANGA,MANHWA,MANHUA";
-  var SECTION_ID_FEATURED = "featured";
+  var HOME_PAGE_SIZE = 20;
+  var SEARCH_PAGE_SIZE = 20;
+  var TAXONOMY_CACHE_MS = 30 * 60 * 1000;
+  var SERIES_DETAILS_CACHE_MS = 15 * 1000;
+  var SERIES_DETAILS_CACHE_LIMIT = 16;
+  var READER_CHAPTER_MAP_CACHE_MS = 10 * 60 * 1000;
+  var READER_CHAPTER_MAP_CACHE_LIMIT = 32;
   var SECTION_ID_POPULAR = "popular_today";
-  var SECTION_ID_LATEST = "latest_releases";
-  var SECTION_ID_MOST_POPULAR = "most_popular";
-  var SECTION_ID_LATEST_UPDATES = "latest_updates";
-  var SEARCH_FIELD_MIN_CHAPTERS = "min_chapters";
+  var SECTION_ID_LATEST = "latest_updates";
+  var SECTION_ID_NEWEST = "latest_releases";
+  var SECTION_ID_TOP_RATED = "most_popular";
   var SEARCH_TAG_PREFIX_GENRE = "genre:";
+  var SEARCH_TAG_PREFIX_TAG = "tag:";
   var SEARCH_TAG_PREFIX_STATUS = "status:";
+  var SEARCH_TAG_PREFIX_ORIGIN = "origin:";
   var SEARCH_TAG_PREFIX_SORT = "sort:";
-  var SEARCH_TAG_PREFIX_ORDER = "order:";
-  var ARCHIVE_SORT_OPTIONS = [
-    { id: "latest_chapters", label: "Latest Chapters", orderBy: "lastChapterAddedAt", defaultDirection: "desc" },
-    { id: "popular", label: "Most Popular", orderBy: "totalViews", defaultDirection: "desc" },
-    { id: "newest", label: "Newest Added", orderBy: "createdAt", defaultDirection: "desc" },
-    { id: "oldest", label: "Oldest First", orderBy: "createdAt", defaultDirection: "asc" },
-    { id: "most_chapters", label: "Most Chapters", orderBy: "chaptersCount", defaultDirection: "desc" },
-    { id: "alphabetical", label: "A-Z", orderBy: "postTitle", defaultDirection: "asc" }
-  ];
-  var ARCHIVE_ORDER_OPTIONS = [
-    { id: "desc", label: "Descending" },
-    { id: "asc", label: "Ascending" }
-  ];
+  var SEARCH_FIELD_MIN_CHAPTERS = "min_chapters";
+  var SEARCH_FIELD_MAX_CHAPTERS = "max_chapters";
+  var SERIES_ID_SEPARATOR = "::";
   var STATE_SHOW_LOCKED_CHAPTERS = "show_locked_chapters";
   var LOCKED_CHAPTER_LABEL_PREFIX = "[Locked] ";
-  var CHAPTER_ACCESS_READABLE = "readable";
-  var CHAPTER_ACCESS_LOCKED = "locked";
-  var CHAPTER_ACCESS_UNKNOWN = "unknown";
+  var SORT_OPTIONS = [
+    { id: "updated", label: "Recently Updated", apiValue: "updated" },
+    { id: "popular", label: "Most Bookmarked", apiValue: "popular" },
+    { id: "views", label: "Most Viewed", apiValue: "views" },
+    { id: "longest", label: "Longest", apiValue: "longest" },
+    { id: "trending", label: "Trending", apiValue: "trending" },
+    { id: "rating", label: "Top Rated", apiValue: "rating" },
+    { id: "newest", label: "Newest", apiValue: "newest" }
+  ];
+  var STATUS_OPTIONS = [
+    { id: "ONGOING", label: "Ongoing", apiValue: "Ongoing" },
+    { id: "COMPLETED", label: "Completed", apiValue: "Completed" },
+    { id: "HIATUS", label: "Hiatus", apiValue: "Hiatus" },
+    { id: "DROPPED", label: "Dropped", apiValue: "Dropped" },
+    { id: "DISCONTINUED", label: "Discontinued", apiValue: "Discontinued" },
+    { id: "UPCOMING", label: "Upcoming", apiValue: "Upcoming" }
+  ];
+  var ORIGIN_OPTIONS = [
+    { id: "KOREAN", label: "Korean", apiValue: "KOREAN" },
+    { id: "JAPANESE", label: "Japanese", apiValue: "JAPANESE" },
+    { id: "CHINESE", label: "Chinese", apiValue: "CHINESE" },
+    { id: "OTHER", label: "Other", apiValue: "OTHER" }
+  ];
   var GENRE_LABEL_OVERRIDES = {
     "adult1": "Adult",
-    "bagelboy": "Bagel Boy",
     "bdsm": "BDSM",
-    "bdsm sub dom": "BDSM / Sub-Dom",
     "bl": "BL",
-    "sm bdsm sub dom": "BDSM / Sub-Dom",
-    "cheating infidelity": "Cheating / Infidelity",
+    "boys love bl": "Boys Love (BL)",
     "coming of age": "Coming of Age",
-    "devotedman": "Devoted Man",
-    "dirtytalk": "Dirty Talk",
-    "firstlove": "First Love",
-    "highintensity": "High Intensity",
-    "innocentfemalelead": "Innocent Female Lead",
+    "josei": "Josei",
     "joesi": "Josei",
     "ntr": "NTR",
-    "oneshot": "One Shot",
-    "purelove": "Pure Love",
+    "one shot": "One Shot",
     "romace": "Romance",
-    "romcom": "Rom-Com",
-    "schemingmalelead": "Scheming Male Lead",
-    "seinen m": "Seinen (M)",
-    "slice of life": "Slice of Life",
-    "s m": "S&M",
-    "sm": "SM",
-    "wolfs": "Wolves"
+    "sci fi": "Sci-Fi",
+    "slice of life": "Slice of Life"
   };
 
   // Source Info
 
   var DivaScansInfo = {
-    version: "1.0.0",
+    version: "2.0.0",
     name: "DivaScans",
     description: "Extension that pulls series from " + DOMAIN,
     author: "real",
@@ -105,7 +102,7 @@
           request.headers = Object.assign({}, request.headers || {}, {
             referer: DOMAIN + "/",
             origin: DOMAIN,
-            accept: "application/json, text/plain, */*",
+            accept: request.headers && request.headers.accept || "application/json, text/plain, */*",
             "user-agent": await this.requestManager.getDefaultUserAgent()
           });
           return request;
@@ -117,10 +114,14 @@
     });
 
     this.stateManager = App.createSourceStateManager();
-    this.cachedBrowseSeries = null;
-    this.cachedFilterData = null;
+    this.cachedTaxonomy = null;
+    this.cachedTaxonomyExpiresAt = 0;
+    this.cachedTaxonomyPromise = null;
     this.cachedSeriesDetails = {};
-    this.cachedSeriesChapters = {};
+    this.cachedSeriesDetailsOrder = [];
+    this.cachedSeriesDetailsPromises = {};
+    this.cachedReaderChapterMaps = {};
+    this.cachedReaderChapterMapOrder = [];
   }
 
   // Paperback Interface Methods
@@ -130,81 +131,63 @@
   };
 
   DivaScans.prototype.getTags = async function() {
-    if (typeof this.getSearchTags === "function") {
-      return this.getSearchTags();
-    }
-    return [];
+    return this.getSearchTags();
   };
 
   DivaScans.prototype.getMangaShareUrl = function(seriesId) {
-    return DOMAIN + "/series/" + encodePathSegment(seriesId);
+    return DOMAIN + "/series/comic/" + encodePathSegment(getSeriesWebSlug(seriesId));
   };
 
   DivaScans.prototype.getChapterShareUrl = function(seriesId, chapterId) {
-    return this.getMangaShareUrl(seriesId) + "/" + encodePathSegment(chapterId);
+    return this.getMangaShareUrl(seriesId) + "/chapter/" + encodePathSegment(chapterId);
   };
 
   DivaScans.prototype.getHomePageSections = async function(sectionCallback) {
-    var results = await Promise.all([
-      this.fetchText(DOMAIN),
-      this.getLatestSectionItems(1)
-    ]);
-    var homeHtml = results[0];
-    var latestResults = results[1];
-    var homeData = extractHomePageData(homeHtml);
-    var sections = [
-      createHomeSection(
-        SECTION_ID_FEATURED,
-        "Featured",
-        "featured",
-        homeData.featured.slice(0, HOME_FEATURED_PER_PAGE),
-        false
-      ),
-      createHomeSection(
-        SECTION_ID_POPULAR,
-        "Popular Today",
-        "singleRowLarge",
-        homeData.popularToday.slice(0, HOME_POPULAR_PER_PAGE),
-        false
-      ),
-      createHomeSection(
-        SECTION_ID_LATEST,
-        "Latest Releases",
-        "singleRowNormal",
-        latestResults.results,
-        latestResults.metadata !== void 0
-      ),
-      createHomeSection(
-        SECTION_ID_MOST_POPULAR,
-        "Most Popular",
-        "singleRowNormal",
-        homeData.mostPopular.slice(0, HOME_MOST_POPULAR_PER_PAGE),
-        false
-      ),
-      createHomeSection(
-        SECTION_ID_LATEST_UPDATES,
-        "Latest Updates",
-        "singleRowNormal",
-        homeData.latestUpdates.slice(0, HOME_LATEST_UPDATES_PER_PAGE),
-        false
-      )
+    var source = this;
+    var tasks = [
+      { id: SECTION_ID_POPULAR, title: "Popular", type: "singleRowLarge", sort: "popular" },
+      { id: SECTION_ID_LATEST, title: "Latest Updates", type: "singleRowNormal", sort: "updated" },
+      { id: SECTION_ID_NEWEST, title: "Newly Added", type: "singleRowNormal", sort: "newest" },
+      { id: SECTION_ID_TOP_RATED, title: "Top Rated", type: "singleRowNormal", sort: "rating" }
     ];
 
-    sections.filter(function(section) {
-      return Array.isArray(section.items) && section.items.length > 0;
-    }).forEach(function(section) {
-      sectionCallback(section);
-    });
+    await Promise.all(tasks.map(async function(task) {
+      try {
+        var page = await source.fetchBrowsePage(1, HOME_PAGE_SIZE, { sort: task.sort });
+        var section = createHomeSection(
+          task.id,
+          task.title,
+          task.type,
+          mapSeriesItems(page.items),
+          page.hasMore
+        );
+        if (section.items.length > 0) {
+          sectionCallback(section);
+        }
+      } catch (error) {
+        // One failed live feed should not suppress the remaining homepage sections.
+      }
+    }));
   };
 
   DivaScans.prototype.getViewMoreItems = async function(homepageSectionId, metadata) {
-    if (homepageSectionId !== SECTION_ID_LATEST) {
-      return App.createPagedResults({
-        results: []
-      });
+    var sortBySection = {};
+    sortBySection[SECTION_ID_POPULAR] = "popular";
+    sortBySection[SECTION_ID_LATEST] = "updated";
+    sortBySection[SECTION_ID_NEWEST] = "newest";
+    sortBySection[SECTION_ID_TOP_RATED] = "rating";
+
+    var sort = sortBySection[homepageSectionId];
+    if (!sort) {
+      return App.createPagedResults({ results: [] });
     }
 
-    return this.getLatestSectionItems(toPositiveInteger(metadata && metadata.page, 1));
+    var pageNumber = toPositiveInteger(metadata && metadata.page, 1);
+    var page = await this.fetchBrowsePage(pageNumber, HOME_PAGE_SIZE, { sort: sort });
+    return App.createPagedResults({
+      results: mapSeriesItems(page.items),
+      metadata: page.hasMore ? { page: pageNumber + 1 } : void 0
+    });
   };
 
   DivaScans.prototype.getCloudflareBypassRequestAsync = async function() {
@@ -240,34 +223,36 @@
   };
 
   DivaScans.prototype.supportsTagExclusion = async function() {
-    return false;
+    // Paperback exposes exclusion source-wide. DivaScans maps genre/tag
+    // exclusions directly and status/origin exclusions to allowed complements.
+    // Sort is ordering rather than a result category, so it is not excludable.
+    return true;
   };
 
   DivaScans.prototype.getSearchTags = async function() {
-    if (!this.cachedFilterData) {
-      this.cachedFilterData = await this.fetchFilterData();
-    }
-
-    return buildSearchTagSections(this.cachedFilterData);
+    return buildSearchTagSections(await this.fetchTaxonomy());
   };
 
   DivaScans.prototype.getSearchFields = async function() {
-    return [createMinimumChaptersSearchField()];
+    return [
+      createChapterCountSearchField(SEARCH_FIELD_MIN_CHAPTERS, "Minimum Chapters", "e.g. 10"),
+      createChapterCountSearchField(SEARCH_FIELD_MAX_CHAPTERS, "Maximum Chapters", "e.g. 100")
+    ];
   };
 
   DivaScans.prototype.getMangaDetails = async function(seriesId) {
     var series = await this.fetchSeriesDetails(seriesId);
 
     return App.createSourceManga({
-      id: seriesId,
+      id: cleanText(seriesId),
       mangaInfo: App.createMangaInfo({
-        titles: buildTitles(series.postTitle, series.alternativeTitles),
-        image: resolveSeriesImage(series),
-        desc: cleanText(series.postContent || ""),
+        titles: buildTitles(series),
+        image: normalizeUrl(series.cover_image),
+        desc: cleanText(series.description || ""),
         author: emptyToUndefined(series.author),
         artist: emptyToUndefined(series.artist),
-        status: mapStatus(series.seriesStatus),
-        rating: toNumber(series.averageRating, 0),
+        status: mapStatus(series.status),
+        rating: toNumber(series.rating, 0),
         tags: buildDetailTagSections(series),
         hentai: false
       })
@@ -277,57 +262,71 @@
   DivaScans.prototype.getChapters = async function(seriesId) {
     var series = await this.fetchSeriesDetails(seriesId);
     var showLockedChapters = await getShowLockedChapters(this.stateManager);
-    var chapters = await this.fetchSeriesChapters(series);
-
-    chapters = chapters.filter(isDisplayChapter).sort(compareChapterEntriesDesc);
-
-    var visibleChapters = chapters.filter(function(chapter) {
-      return shouldIncludeChapterForList(chapter, showLockedChapters);
-    }).map(function(chapter, index) {
-      var chapterNumber = toChapterNumber(chapter.number, chapters.length - index);
+    var chapters = normalizeChapterEntries(series.chapters).slice().sort(compareChaptersDesc);
+    var visible = chapters.filter(function(chapter) {
+      return showLockedChapters === true || chapter.is_premium !== true;
+    }).map(function(chapter) {
+      var chapterNumber = toChapterNumber(chapter.number, 0);
       return App.createChapter({
-        id: String(chapter.slug || ""),
+        id: String(chapterNumber),
         name: buildChapterListName(chapter, chapterNumber),
         chapNum: chapterNumber,
-        time: parseDate(chapter.updatedAt || chapter.createdAt),
+        time: parseDate(chapter.published_at),
         langCode: "en"
       });
     });
 
-    if (visibleChapters.length === 0) {
+    if (visible.length === 0) {
       throw new Error("No readable chapters were found for " + seriesId + ".");
     }
 
-    return visibleChapters;
+    return visible;
   };
 
   DivaScans.prototype.getChapterDetails = async function(seriesId, chapterId) {
-    var payload = await this.fetchJson(buildApiUrl("/chapter/content", {
-      mangaslug: seriesId,
-      chapterslug: chapterId
-    }));
-
-    if (!isObject(payload) || payload.isAccessible !== true) {
-      throw new Error("This chapter is locked on DivaScans and cannot be loaded in Paperback.");
+    var chapterNumber = toChapterNumber(chapterId, NaN);
+    if (!isFinite(chapterNumber)) {
+      throw new Error("DivaScans returned an invalid chapter number for " + chapterId + ".");
     }
 
-    var images = Array.isArray(payload.images) ? payload.images.slice() : [];
-    images.sort(function(left, right) {
-      return toNumber(left && left.order, 0) - toNumber(right && right.order, 0);
-    });
+    var cachedInternalId = this.getCachedReaderChapterId(seriesId, chapterNumber);
+    if (cachedInternalId) {
+      try {
+        var cachedPages = await this.fetchReaderPagesByInternalId(cachedInternalId);
+        if (cachedPages.length > 0) {
+          return App.createChapterDetails({
+            id: String(chapterId),
+            mangaId: seriesId,
+            pages: cachedPages
+          });
+        }
+        this.evictCachedReaderChapterId(seriesId, chapterNumber);
+      } catch (error) {
+        if (isLockedChapterError(error)) {
+          throw error;
+        }
+        this.evictCachedReaderChapterId(seriesId, chapterNumber);
+        // Fall back to the live chapter page when a cached internal id goes stale.
+      }
+    }
 
-    var pages = images.map(function(image) {
-      return normalizeUrl(image && image.url || "");
-    }).filter(function(url) {
-      return url.length > 0;
-    });
+    var html = await this.fetchText(buildChapterUrl(seriesId, chapterNumber));
+    if (isChapterNotFoundPage(html)) {
+      throw new Error("DivaScans no longer exposes chapter " + chapterId + " for " + seriesId + ".");
+    }
+    var readerChapter = extractReaderChapter(html, chapterNumber);
+    this.cacheReaderChapterMap(seriesId, extractReaderChapterIds(html, readerChapter));
+    if (isReaderChapterRedacted(readerChapter)) {
+      throw createLockedChapterError();
+    }
+    var pages = normalizeReaderPages(readerChapter && readerChapter.pages);
 
     if (pages.length === 0) {
       throw new Error("DivaScans did not expose readable pages for this chapter.");
     }
 
     return App.createChapterDetails({
-      id: chapterId,
+      id: String(chapterId),
       mangaId: seriesId,
       pages: pages
     });
@@ -335,192 +334,225 @@
 
   DivaScans.prototype.getSearchResults = async function(query, metadata) {
     var title = cleanText(query && query.title || "");
-    var page = toPositiveInteger(metadata && metadata.page, 1);
     var filters = extractSearchFilters(query);
+    var pageNumber = toPositiveInteger(metadata && metadata.page, 1);
 
-    if (hasActiveSearchFilters(filters)) {
-      return this.getArchiveSearchResults(title, filters, page);
+    if (title.length > 0 && title.length < 2) {
+      // The live browse backend treats one-character q values as an empty query.
+      return App.createPagedResults({ results: [] });
+    }
+    if (filters.impossible || (filters.minChapters > 0 && filters.maxChapters > 0 && filters.minChapters > filters.maxChapters)) {
+      return App.createPagedResults({ results: [] });
     }
 
-    if (title.length > 0) {
-      return this.getTitleSearchResults(title, page);
-    }
+    var page = await this.fetchBrowsePage(pageNumber, SEARCH_PAGE_SIZE, {
+      query: title,
+      genres: filters.genresIn,
+      excludedGenres: filters.genresEx,
+      tags: filters.tagsIn,
+      excludedTags: filters.tagsEx,
+      statuses: filters.statuses,
+      origins: filters.origins,
+      sort: filters.sortBy || "updated",
+      minChapters: filters.minChapters,
+      maxChapters: filters.maxChapters
+    });
 
-    return createPagedSeriesResults(await this.fetchAllBrowseSeries(), page, SEARCH_PER_PAGE);
+    var source = this;
+    page.items.forEach(function(series) {
+      source.cacheBrowseChapterIds(series);
+    });
+
+    return App.createPagedResults({
+      results: mapSeriesItems(page.items),
+      metadata: page.hasMore ? { page: pageNumber + 1 } : void 0
+    });
   };
 
   // Source-Specific Fetch Helpers
 
-  DivaScans.prototype.getLatestSectionItems = async function(page) {
-    var latestPage = await this.fetchPostsPage(page, HOME_LATEST_PER_PAGE, {
-      tag: ""
-    });
+  DivaScans.prototype.fetchBrowsePage = async function(page, limit, options) {
+    var resolvedPage = toPositiveInteger(page, 1);
+    var resolvedLimit = toPositiveInteger(limit, SEARCH_PAGE_SIZE);
+    var params = {
+      page: resolvedPage,
+      limit: resolvedLimit,
+      contentMode: "comics"
+    };
 
-    return App.createPagedResults({
-      results: mapHomeItems(latestPage.series),
-      metadata: getNextPageMetadataFromCount(latestPage.totalCount, latestPage.page, latestPage.perPage, latestPage.pageCount)
-    });
-  };
+    addParamIfPresent(params, "q", options && options.query);
+    addListParam(params, "genre", options && options.genres);
+    addListParam(params, "exgenre", options && options.excludedGenres);
+    addListParam(params, "tag", options && options.tags);
+    addListParam(params, "extag", options && options.excludedTags);
+    addListParam(params, "status", options && options.statuses);
+    addListParam(params, "origin", options && options.origins);
+    addParamIfPresent(params, "sort", options && options.sort);
 
-  DivaScans.prototype.fetchFilterData = async function() {
-    var allSeries = await this.fetchAllBrowseSeries();
+    var minChapters = toPositiveInteger(options && options.minChapters, 0);
+    var maxChapters = toPositiveInteger(options && options.maxChapters, 0);
+    if (minChapters > 0) {
+      params.ch_min = minChapters;
+    }
+    if (maxChapters > 0) {
+      params.ch_max = maxChapters;
+    }
+
+    var payload = await this.fetchJson(buildUrl(BROWSE_API, params));
+    var items = normalizeSeriesPayloads(payload && payload.data);
+    var meta = isObject(payload && payload.meta) ? payload.meta : {};
+
     return {
-      genres: extractGenreOptions(allSeries),
-      statuses: extractNamedFilterOptions(allSeries, "seriesStatus")
+      items: items,
+      hasMore: getBrowseHasMore(meta, items.length, resolvedPage, resolvedLimit)
     };
   };
 
-  DivaScans.prototype.fetchAllBrowseSeries = async function() {
-    if (Array.isArray(this.cachedBrowseSeries)) {
-      return this.cachedBrowseSeries;
+  DivaScans.prototype.fetchTaxonomy = async function() {
+    var now = Date.now();
+    if (this.cachedTaxonomy && now < this.cachedTaxonomyExpiresAt) {
+      return this.cachedTaxonomy;
+    }
+    if (this.cachedTaxonomyPromise) {
+      return this.cachedTaxonomyPromise;
     }
 
-    var firstPage = await this.fetchPostsPage(1, BROWSE_PER_PAGE, {});
-    var pages = [firstPage.series];
-    var totalCount = toPositiveInteger(firstPage.totalCount, 0);
+    this.cachedTaxonomyPromise = (async function() {
+      var payload = await this.fetchJson(FACETS_API);
+      var taxonomy = {
+        genres: normalizeFacetOptions(payload && payload.genres),
+        tags: normalizeFacetOptions(payload && payload.tags),
+        statuses: STATUS_OPTIONS.slice(),
+        origins: ORIGIN_OPTIONS.slice(),
+        sorts: SORT_OPTIONS.slice()
+      };
+      this.cachedTaxonomy = taxonomy;
+      this.cachedTaxonomyExpiresAt = Date.now() + TAXONOMY_CACHE_MS;
+      return taxonomy;
+    }.bind(this))();
 
-    if (totalCount > 0) {
-      var totalPages = Math.max(1, Math.ceil(totalCount / BROWSE_PER_PAGE));
-      var pendingPages = [];
-      for (var page = 2; page <= totalPages; page += 1) {
-        pendingPages.push(this.fetchPostsPage(page, BROWSE_PER_PAGE, {}));
-      }
-
-      (await Promise.all(pendingPages)).forEach(function(resultsPage) {
-        pages.push(resultsPage.series);
-      });
-    } else if (firstPage.pageCount >= BROWSE_PER_PAGE) {
-      var nextPage = 2;
-      var nextResultsPage;
-
-      do {
-        nextResultsPage = await this.fetchPostsPage(nextPage, BROWSE_PER_PAGE, {});
-        pages.push(nextResultsPage.series);
-        nextPage += 1;
-      } while (nextResultsPage.pageCount >= BROWSE_PER_PAGE);
+    try {
+      return await this.cachedTaxonomyPromise;
+    } finally {
+      this.cachedTaxonomyPromise = null;
     }
-
-    this.cachedBrowseSeries = normalizeSeriesPayloads([].concat.apply([], pages));
-    return this.cachedBrowseSeries;
-  };
-
-  DivaScans.prototype.fetchPostsPage = async function(page, perPage, options) {
-    var resolvedPage = toPositiveInteger(page, 1);
-    var resolvedPerPage = toPositiveInteger(perPage, SEARCH_PER_PAGE);
-    var response = await this.fetchJson(buildApiUrl("/posts", {
-      page: resolvedPage,
-      perPage: resolvedPerPage,
-      searchTerm: cleanText(options && options.searchTerm || ""),
-      isNovel: false,
-      tag: cleanText(options && options.tag || "")
-    }));
-
-    return {
-      page: resolvedPage,
-      perPage: resolvedPerPage,
-      series: normalizeSeriesPayloads(response && response.posts),
-      totalCount: toPositiveInteger(response && response.totalCount, 0),
-      pageCount: Array.isArray(response && response.posts) ? response.posts.length : 0
-    };
-  };
-
-  DivaScans.prototype.getTitleSearchResults = async function(title, page) {
-    var resultsPage = await this.fetchPostsPage(page, SEARCH_PER_PAGE, {
-      searchTerm: title
-    });
-
-    return App.createPagedResults({
-      results: mapHomeItems(resultsPage.series),
-      metadata: getNextPageMetadataFromCount(resultsPage.totalCount, resultsPage.page, resultsPage.perPage, resultsPage.pageCount)
-    });
-  };
-
-  DivaScans.prototype.getArchiveSearchResults = async function(title, filters, page) {
-    var resolvedPage = toPositiveInteger(page, 1);
-    var archiveFilters = filters;
-
-    if (Array.isArray(filters && filters.genres) && filters.genres.length > 0) {
-      archiveFilters = Object.assign({}, filters, {
-        archiveGenreIds: buildArchiveGenreIds(filters.genres, await this.fetchAllBrowseSeries())
-      });
-    }
-
-    var response = await this.fetchJson(buildApiUrl("/query", buildArchiveQueryParams(title, archiveFilters, resolvedPage, SEARCH_PER_PAGE)));
-    var pagePosts = Array.isArray(response && response.posts) ? response.posts : [];
-    var series = normalizeSeriesPayloads(pagePosts);
-
-    return App.createPagedResults({
-      results: series.map(function(item) {
-        return createPartialSeries(item, buildHomeSubtitle(item));
-      }),
-      metadata: getNextPageMetadataFromCount(response && response.totalCount, resolvedPage, SEARCH_PER_PAGE, pagePosts.length)
-    });
   };
 
   DivaScans.prototype.fetchSeriesDetails = async function(seriesId) {
-    if (isObject(this.cachedSeriesDetails[seriesId])) {
-      return this.cachedSeriesDetails[seriesId];
+    var key = cleanText(seriesId).toLowerCase();
+    if (key.length === 0) {
+      throw new Error("DivaScans requires a series id.");
     }
 
-    var response = await this.fetchJson(buildApiUrl("/post", {
-      postSlug: cleanText(seriesId)
-    }));
-    var series = isObject(response && response.post) ? response.post : null;
-
-    if (!isSeriesPayload(series)) {
-      throw new Error("Unable to decode the DivaScans series payload for " + seriesId + ".");
+    var cached = this.cachedSeriesDetails[key];
+    if (cached && Date.now() < cached.expiresAt) {
+      touchCacheKey(this.cachedSeriesDetailsOrder, key);
+      return cached.value;
     }
 
-    this.cachedSeriesDetails[seriesId] = series;
-    return this.cachedSeriesDetails[seriesId];
+    if (!this.cachedSeriesDetailsPromises[key]) {
+      this.cachedSeriesDetailsPromises[key] = (async function() {
+        var payload = await this.fetchJson(buildUrl(AI_API_BASE + "/series/" + encodePathSegment(getSeriesApiSlug(seriesId))));
+        if (!isSeriesPayload(payload)) {
+          throw new Error("Unable to decode the DivaScans series payload for " + seriesId + ".");
+        }
+        storeBoundedCacheEntry(
+          this.cachedSeriesDetails,
+          this.cachedSeriesDetailsOrder,
+          key,
+          { value: payload, expiresAt: Date.now() + SERIES_DETAILS_CACHE_MS },
+          SERIES_DETAILS_CACHE_LIMIT
+        );
+        return payload;
+      }.bind(this))();
+    }
+
+    var request = this.cachedSeriesDetailsPromises[key];
+    try {
+      return await request;
+    } finally {
+      if (this.cachedSeriesDetailsPromises[key] === request) {
+        delete this.cachedSeriesDetailsPromises[key];
+      }
+    }
   };
 
-  DivaScans.prototype.fetchSeriesChapters = async function(series) {
-    var seriesId = cleanText(series && series.slug);
-    var seriesApiId = toPositiveInteger(series && series.id, 0);
+  DivaScans.prototype.fetchReaderPagesByInternalId = async function(internalChapterId) {
+    var payload = await this.fetchJson(DOMAIN + "/api/chapters/page-urls?chapterId=" + encodeURIComponent(internalChapterId));
+    if (hasRedactedReaderPages(payload && payload.pages)) {
+      throw createLockedChapterError();
+    }
+    return normalizeReaderPages(payload && payload.pages);
+  };
 
-    if (seriesId.length === 0 || seriesApiId <= 0) {
-      throw new Error("DivaScans did not expose a valid series record for the chapter list.");
+  DivaScans.prototype.getCachedReaderChapterId = function(seriesId, chapterNumber) {
+    var key = cleanText(seriesId).toLowerCase();
+    var cached = this.cachedReaderChapterMaps[key];
+    if (!cached || Date.now() >= cached.expiresAt) {
+      return "";
+    }
+    touchCacheKey(this.cachedReaderChapterMapOrder, key);
+    return cleanText(cached.value[String(chapterNumber)]);
+  };
+
+  DivaScans.prototype.cacheBrowseChapterIds = function(series) {
+    var chapterMap = {};
+    (Array.isArray(series && series.chapters) ? series.chapters : []).forEach(function(chapter) {
+      var number = toChapterNumber(chapter && chapter.number, NaN);
+      var id = cleanText(chapter && chapter.id);
+      if (isFinite(number) && id.length > 0) {
+        chapterMap[String(number)] = id;
+      }
+    });
+    this.cacheReaderChapterMap(buildSeriesId(series), chapterMap);
+  };
+
+  DivaScans.prototype.cacheReaderChapterMap = function(seriesId, chapterMap) {
+    var key = cleanText(seriesId).toLowerCase();
+    if (key.length === 0 || !isObject(chapterMap) || Object.keys(chapterMap).length === 0) {
+      return;
     }
 
-    if (Array.isArray(this.cachedSeriesChapters[seriesId])) {
-      return this.cachedSeriesChapters[seriesId];
+    var current = this.cachedReaderChapterMaps[key];
+    var merged = current && Date.now() < current.expiresAt && isObject(current.value) ?
+      Object.assign({}, current.value, chapterMap) : Object.assign({}, chapterMap);
+
+    storeBoundedCacheEntry(
+      this.cachedReaderChapterMaps,
+      this.cachedReaderChapterMapOrder,
+      key,
+      { value: merged, expiresAt: Date.now() + READER_CHAPTER_MAP_CACHE_MS },
+      READER_CHAPTER_MAP_CACHE_LIMIT
+    );
+  };
+
+  DivaScans.prototype.evictCachedReaderChapterId = function(seriesId, chapterNumber) {
+    var key = cleanText(seriesId).toLowerCase();
+    var cached = this.cachedReaderChapterMaps[key];
+    if (cached && isObject(cached.value)) {
+      delete cached.value[String(chapterNumber)];
     }
-
-    var chapters = [];
-    var skip = 0;
-    var pageChapters = [];
-
-    do {
-      pageChapters = normalizeChapterEntries(await this.fetchJson(buildApiUrl("/post/chapters", {
-        postId: seriesApiId,
-        skip: skip,
-        take: CHAPTERS_PER_REQUEST,
-        order: "desc"
-      })));
-      chapters = chapters.concat(pageChapters);
-      skip += pageChapters.length;
-    } while (pageChapters.length === CHAPTERS_PER_REQUEST);
-
-    this.cachedSeriesChapters[seriesId] = chapters;
-    return chapters;
   };
 
   DivaScans.prototype.fetchJson = async function(url) {
     var response = await this.requestManager.schedule(App.createRequest({
       url: url,
-      method: "GET"
+      method: "GET",
+      headers: {
+        accept: "application/json"
+      }
     }), 1);
-
     return parseJsonResponse(response, url);
   };
 
   DivaScans.prototype.fetchText = async function(url) {
     var response = await this.requestManager.schedule(App.createRequest({
       url: url,
-      method: "GET"
+      method: "GET",
+      headers: {
+        accept: "text/html,application/xhtml+xml"
+      }
     }), 1);
-
     return parseTextResponse(response, url);
   };
 
@@ -537,7 +569,7 @@
     try {
       return JSON.parse(String(response.data || ""));
     } catch (error) {
-      throw new Error("DivaScans returned unreadable JSON from " + formatRequestLabel(url) + ": " + String(error) + "." + buildDiagnosticPreview(raw));
+      throw new Error("DivaScans returned unreadable JSON from " + formatRequestLabel(url) + "." + buildDiagnosticPreview(raw));
     }
   }
 
@@ -564,10 +596,11 @@
 
   function isChallengePage(html) {
     var lower = String(html || "").toLowerCase();
-    return lower.includes("just a moment") && lower.includes("cloudflare");
+    return (lower.indexOf("just a moment") !== -1 && lower.indexOf("cloudflare") !== -1) ||
+      (lower.indexOf("be right back") !== -1 && lower.indexOf("maintenance") !== -1);
   }
 
-  function buildApiUrl(path, params) {
+  function buildUrl(base, params) {
     var entries = [];
     Object.keys(params || {}).forEach(function(key) {
       var value = params[key];
@@ -576,15 +609,50 @@
       }
       entries.push(encodeURIComponent(key) + "=" + encodeURIComponent(String(value)));
     });
+    return base + (entries.length > 0 ? "?" + entries.join("&") : "");
+  }
 
-    return API_BASE + path + (entries.length > 0 ? "?" + entries.join("&") : "");
+  function buildChapterUrl(seriesId, chapterNumber) {
+    return DOMAIN + "/series/comic/" + encodePathSegment(getSeriesWebSlug(seriesId)) + "/chapter/" + encodePathSegment(chapterNumber);
+  }
+
+  function buildSeriesId(series) {
+    var apiSlug = cleanText(series && series.slug);
+    var webSlug = cleanText(series && series.urlSlug);
+    if (apiSlug.length === 0) {
+      return "";
+    }
+    if (webSlug.length > 0 && webSlug !== apiSlug) {
+      return apiSlug + SERIES_ID_SEPARATOR + webSlug;
+    }
+    return apiSlug;
+  }
+
+  function getSeriesApiSlug(seriesId) {
+    return splitSeriesId(seriesId).apiSlug;
+  }
+
+  function getSeriesWebSlug(seriesId) {
+    return splitSeriesId(seriesId).webSlug;
+  }
+
+  function splitSeriesId(seriesId) {
+    var value = cleanText(seriesId);
+    var separatorIndex = value.indexOf(SERIES_ID_SEPARATOR);
+    if (separatorIndex === -1) {
+      return { apiSlug: value, webSlug: value };
+    }
+
+    var apiSlug = cleanText(value.slice(0, separatorIndex));
+    var webSlug = cleanText(value.slice(separatorIndex + SERIES_ID_SEPARATOR.length));
+    return {
+      apiSlug: apiSlug,
+      webSlug: webSlug.length > 0 ? webSlug : apiSlug
+    };
   }
 
   function formatRequestLabel(url) {
     var value = String(url || "");
-    if (value.indexOf(API_BASE) === 0) {
-      return value.slice(API_BASE.length) || "/";
-    }
     if (value.indexOf(DOMAIN) === 0) {
       return value.slice(DOMAIN.length) || "/";
     }
@@ -604,71 +672,70 @@
 
   // Series / Card Helpers
 
-  function createPartialSeries(series, subtitle) {
-    return App.createPartialSourceManga({
-      mangaId: String(series.slug || ""),
-      title: cleanText(series.postTitle || ""),
-      image: resolveSeriesImage(series),
-      subtitle: emptyToUndefined(subtitle)
-    });
-  }
-
   function normalizeSeriesPayloads(seriesList) {
-    var deduped = {};
-    var ordered = [];
-
+    var seen = {};
+    var items = [];
     (Array.isArray(seriesList) ? seriesList : []).forEach(function(series) {
-      if (!isSeriesPayload(series) || series.isNovel === true || cleanText(series.seriesType).toUpperCase() === "NOVEL") {
+      if (!isSeriesPayload(series) || !isComicType(series.type)) {
         return;
       }
-
       var slug = cleanText(series.slug);
-      if (slug.length === 0 || deduped[slug]) {
+      if (slug.length === 0 || seen[slug]) {
         return;
       }
-
-      deduped[slug] = true;
-      ordered.push(series);
+      seen[slug] = true;
+      items.push(series);
     });
-
-    return ordered;
+    return items;
   }
 
   function isSeriesPayload(series) {
-    return isObject(series) &&
-      typeof series.slug === "string" &&
-      typeof series.postTitle === "string";
+    return isObject(series) && typeof series.slug === "string" && typeof series.title === "string";
   }
 
-  function createPagedSeriesResults(seriesList, page, perPage) {
-    var normalizedSeries = normalizeSeriesPayloads(seriesList);
-    var start = Math.max(0, (page - 1) * perPage);
-    var end = start + perPage;
-    var pageItems = normalizedSeries.slice(start, end).map(function(series) {
-      return createPartialSeries(series, buildHomeSubtitle(series));
-    });
+  function isComicType(type) {
+    var value = cleanText(type).toUpperCase();
+    return value === "MANGA" || value === "MANHWA" || value === "MANHUA" || value === "WEBTOON" || value === "COMIC";
+  }
 
-    return App.createPagedResults({
-      results: pageItems,
-      metadata: end < normalizedSeries.length ? { page: page + 1 } : void 0
+  function createPartialSeries(series) {
+    return App.createPartialSourceManga({
+      mangaId: buildSeriesId(series),
+      title: cleanText(series.title),
+      image: normalizeUrl(series.cover_image || series.coverImage),
+      subtitle: buildSeriesSubtitle(series)
     });
   }
 
-  function getNextPageMetadataFromCount(totalCount, currentPage, perPage, currentCount) {
-    var resolvedTotalCount = toPositiveInteger(totalCount, 0);
-    if (resolvedTotalCount > currentPage * perPage) {
-      return {
-        page: currentPage + 1
-      };
+  function mapSeriesItems(items) {
+    return normalizeSeriesPayloads(items).map(createPartialSeries);
+  }
+
+  function buildSeriesSubtitle(series) {
+    var chapterCount = toPositiveInteger(series && series.chapter_count, 0);
+    if (chapterCount > 0) {
+      return chapterCount + (chapterCount === 1 ? " chapter" : " chapters");
     }
 
-    if (resolvedTotalCount === 0 && toPositiveInteger(currentCount, 0) >= perPage) {
-      return {
-        page: currentPage + 1
-      };
+    var latestChapter = findLatestPreviewChapter(series && series.chapters);
+    if (latestChapter) {
+      var chapterNumber = toChapterNumber(latestChapter.number, 0);
+      var label = "Chapter " + chapterNumber;
+      return latestChapter.isLocked === true ? LOCKED_CHAPTER_LABEL_PREFIX + label : label;
     }
 
-    return void 0;
+    var status = formatOptionLabel(series && series.status);
+    return status.length > 0 ? status : void 0;
+  }
+
+  function findLatestPreviewChapter(chapters) {
+    var latest = null;
+    (Array.isArray(chapters) ? chapters : []).forEach(function(chapter) {
+      if (!latest || toChapterNumber(chapter && chapter.number, 0) > toChapterNumber(latest.number, 0)) {
+        latest = chapter;
+      }
+    });
+    return latest;
   }
 
   // Homepage Helpers
@@ -678,658 +745,295 @@
       id: id,
       title: title,
       type: type,
-      items: items,
-      containsMoreItems: containsMoreItems
+      items: Array.isArray(items) ? items : [],
+      containsMoreItems: containsMoreItems === true
     });
-  }
-
-  function mapHomeItems(seriesList) {
-    return normalizeSeriesPayloads(seriesList).map(function(series) {
-      return createPartialSeries(series, buildHomeSubtitle(series));
-    });
-  }
-
-  function buildHomeSubtitle(series) {
-    var latestChapter = findFirstChapterPreview(series && series.chapters);
-    if (latestChapter) {
-      return buildChapterListName(latestChapter, toChapterNumber(latestChapter.number, 0));
-    }
-
-    var statusLabel = formatOptionLabel(series && series.seriesStatus);
-    return statusLabel.length > 0 ? statusLabel : void 0;
-  }
-
-  function extractHomePageData(html) {
-    var flightChunks = decodeNextFlightChunks(html);
-    return {
-      featured: extractFeaturedItemsFromFlight(flightChunks),
-      popularToday: extractPopularTodayItemsFromFlight(flightChunks),
-      mostPopular: extractMostPopularItemsFromFlight(flightChunks),
-      latestUpdates: extractLatestUpdateItemsFromFlight(flightChunks)
-    };
-  }
-
-  function extractFeaturedItemsFromFlight(flightChunks) {
-    return mapFlightHomeItems(extractFlightArrayValue(flightChunks, "sliderPosts"), function(series) {
-      return createHomeCard(
-        cleanText(series && series.slug),
-        cleanText(series && (series.postTitle || series.title)),
-        resolveSeriesImage(series),
-        buildGenreSubtitle(series && series.genres, 3)
-      );
-    });
-  }
-
-  function extractPopularTodayItemsFromFlight(flightChunks) {
-    return mapFlightHomeItems(extractFlightArrayValue(flightChunks, "popularPosts"), function(series) {
-      return createHomeCard(
-        cleanText(series && series.slug),
-        cleanText(series && (series.postTitle || series.title)),
-        resolveSeriesImage(series),
-        buildPopularTodaySubtitle(series)
-      );
-    });
-  }
-
-  function extractMostPopularItemsFromFlight(flightChunks) {
-    return mapFlightHomeItems(extractFlightArrayValue(flightChunks, "series"), function(series) {
-      return createHomeCard(
-        cleanText(series && series.slug),
-        cleanText(series && (series.title || series.postTitle)),
-        resolveSeriesImage(series),
-        buildGenreSubtitle(series && series.tags, 3)
-      );
-    });
-  }
-
-  function mapFlightHomeItems(items, mapper) {
-    var deduped = {};
-    var mappedItems = [];
-
-    (Array.isArray(items) ? items : []).forEach(function(item) {
-      var mappedItem = typeof mapper === "function" ? mapper(item) : null;
-      var seriesId = cleanText(mappedItem && mappedItem.mangaId);
-      if (seriesId.length === 0 || deduped[seriesId]) {
-        return;
-      }
-
-      deduped[seriesId] = true;
-      mappedItems.push(mappedItem);
-    });
-
-    return mappedItems;
-  }
-
-  function extractLatestUpdateItemsFromFlight(flightChunks) {
-    return mapFlightHomeItems(extractFlightArrayValue(flightChunks, "items"), function(item) {
-      return createHomeCard(
-        cleanText(item && item.seriesSlug),
-        cleanText(item && item.seriesTitle),
-        normalizeUrl(item && item.seriesImage),
-        buildLatestUpdateChapterLabel(item)
-      );
-    });
-  }
-
-  function buildPopularTodaySubtitle(series) {
-    var parts = [];
-    var rating = formatRatingLabel(series && series.averageRating);
-
-    if (rating.length > 0) {
-      parts.push(rating);
-    }
-
-    return parts.concat(extractDisplayLabels(series && series.genres, 4)).join(" \u00b7 ");
-  }
-
-  function buildGenreSubtitle(values, limit) {
-    return extractDisplayLabels(values, limit).join(" \u00b7 ");
-  }
-
-  function extractDisplayLabels(values, limit) {
-    var labels = [];
-    var seen = {};
-    var max = toPositiveInteger(limit, 0);
-
-    (Array.isArray(values) ? values : []).forEach(function(value) {
-      var label = normalizeGenreLabel(isObject(value) ? value.name || value.label || "" : value);
-      var key = toOptionId(label);
-
-      if (label.length === 0 || key.length === 0 || seen[key] || (max > 0 && labels.length >= max)) {
-        return;
-      }
-
-      seen[key] = true;
-      labels.push(label);
-    });
-
-    return labels;
-  }
-
-  function formatRatingLabel(value) {
-    var rating = toNumber(value, NaN);
-    if (!isFinite(rating) || rating <= 0) {
-      return "";
-    }
-
-    return "\u2605 " + String(Math.round(rating * 100) / 100);
-  }
-
-  function buildLatestUpdateChapterLabel(item) {
-    var chapter = {
-      number: item && item.chapterNumber,
-      title: item && item.chapterTitle
-    };
-    var chapterNumber = toChapterNumber(item && item.chapterNumber, 0);
-
-    return item && item.isPaid === true ?
-      buildLockedChapterLabel(chapter, chapterNumber) :
-      buildReadableChapterLabel(chapter, chapterNumber);
-  }
-
-  function createHomeCard(seriesId, title, image, subtitle) {
-    if (seriesId.length === 0 || title.length === 0 || image.length === 0) {
-      return null;
-    }
-
-    return App.createPartialSourceManga({
-      mangaId: seriesId,
-      title: title,
-      image: image,
-      subtitle: emptyToUndefined(subtitle)
-    });
-  }
-
-  function decodeNextFlightChunks(html) {
-    var chunks = [];
-    var match;
-    var flightRegex = /self\.__next_f\.push\(\[1,("(?:(?:\\.|[^"\\])*)")\]\)<\/script>/g;
-
-    while ((match = flightRegex.exec(String(html || ""))) !== null) {
-      try {
-        chunks.push(JSON.parse(match[1]));
-      } catch (error) {
-      }
-    }
-
-    return chunks;
-  }
-
-  function extractFlightArrayValue(flightChunks, key) {
-    var value = extractFlightValue(flightChunks, key);
-    return Array.isArray(value) ? value : [];
-  }
-
-  function extractFlightValue(flightChunks, key) {
-    var marker = '"' + String(key || "") + '":';
-
-    for (var chunkIndex = 0; chunkIndex < flightChunks.length; chunkIndex += 1) {
-      var chunk = String(flightChunks[chunkIndex] || "");
-      var markerIndex = chunk.indexOf(marker);
-      if (markerIndex === -1) {
-        continue;
-      }
-
-      var parsedValue = extractJsonValueAtIndex(chunk, markerIndex + marker.length);
-      if (parsedValue !== null) {
-        return parsedValue;
-      }
-    }
-
-    return null;
-  }
-
-  function extractJsonValueAtIndex(source, valueIndex) {
-    var index = toPositiveInteger(valueIndex, 0) - 1;
-    var openToken = "";
-    var closeToken = "";
-    var depth = 0;
-    var inString = false;
-    var isEscaped = false;
-
-    while (index + 1 < source.length && /\s/.test(source.charAt(index + 1))) {
-      index += 1;
-    }
-
-    openToken = source.charAt(index + 1);
-    closeToken = openToken === "[" ? "]" : openToken === "{" ? "}" : "";
-    if (closeToken.length === 0) {
-      return null;
-    }
-
-    for (var charIndex = index + 1; charIndex < source.length; charIndex += 1) {
-      var character = source.charAt(charIndex);
-
-      if (inString) {
-        if (isEscaped) {
-          isEscaped = false;
-        } else if (character === "\\") {
-          isEscaped = true;
-        } else if (character === '"') {
-          inString = false;
-        }
-        continue;
-      }
-
-      if (character === '"') {
-        inString = true;
-        continue;
-      }
-
-      if (character === openToken) {
-        depth += 1;
-        continue;
-      }
-
-      if (character === closeToken) {
-        depth -= 1;
-        if (depth === 0) {
-          try {
-            return JSON.parse(source.slice(index + 1, charIndex + 1));
-          } catch (error) {
-            return null;
-          }
-        }
-      }
-    }
-
-    return null;
   }
 
   // Search / Filter Helpers
 
-  function buildSearchTagSections(filterData) {
+  function buildSearchTagSections(taxonomy) {
     var sections = [];
-    var genres = normalizeFilterOptions(filterData && filterData.genres);
-    var statuses = normalizeFilterOptions(filterData && filterData.statuses);
+    var genres = Array.isArray(taxonomy && taxonomy.genres) ? taxonomy.genres : [];
+    var tags = Array.isArray(taxonomy && taxonomy.tags) ? taxonomy.tags : [];
 
     if (genres.length > 0) {
-      sections.push(App.createTagSection({
-        id: "genres",
-        label: "Genres",
-        tags: genres.map(function(option) {
-          return App.createTag({
-            id: SEARCH_TAG_PREFIX_GENRE + option.id,
-            label: option.label
-          });
-        })
-      }));
+      sections.push(createOptionTagSection("genres", "Genres", SEARCH_TAG_PREFIX_GENRE, genres));
+    }
+    if (tags.length > 0) {
+      sections.push(createOptionTagSection("tags", "Tags", SEARCH_TAG_PREFIX_TAG, tags));
     }
 
-    if (statuses.length > 0) {
-      sections.push(App.createTagSection({
-        id: "status",
-        label: "Status",
-        tags: statuses.map(function(option) {
-          return App.createTag({
-            id: SEARCH_TAG_PREFIX_STATUS + option.id,
-            label: option.label
-          });
-        })
-      }));
-    }
-
-    sections.push(App.createTagSection({
-      id: "sort",
-      label: "Sort",
-      tags: ARCHIVE_SORT_OPTIONS.map(function(option) {
-        return App.createTag({
-          id: SEARCH_TAG_PREFIX_SORT + option.id,
-          label: option.label
-        });
-      })
-    }));
-
-    sections.push(App.createTagSection({
-      id: "order",
-      label: "Order",
-      tags: ARCHIVE_ORDER_OPTIONS.map(function(option) {
-        return App.createTag({
-          id: SEARCH_TAG_PREFIX_ORDER + option.id,
-          label: option.label
-        });
-      })
-    }));
-
+    sections.push(createOptionTagSection("status", "Status", SEARCH_TAG_PREFIX_STATUS, STATUS_OPTIONS));
+    sections.push(createOptionTagSection("origin", "Origin", SEARCH_TAG_PREFIX_ORIGIN, ORIGIN_OPTIONS));
+    sections.push(createOptionTagSection("sort", "Sort", SEARCH_TAG_PREFIX_SORT, SORT_OPTIONS));
     return sections;
+  }
+
+  function createOptionTagSection(id, label, prefix, options) {
+    return App.createTagSection({
+      id: id,
+      label: label,
+      tags: options.map(function(option) {
+        return App.createTag({
+          id: prefix + option.id,
+          label: option.label
+        });
+      })
+    });
   }
 
   function extractSearchFilters(query) {
     var filters = {
-      genres: [],
-      status: void 0,
-      minChapters: extractMinimumChaptersFilterValue(query),
+      genresIn: [],
+      genresEx: [],
+      tagsIn: [],
+      tagsEx: [],
+      statuses: [],
+      statusesEx: [],
+      origins: [],
+      originsEx: [],
       sortBy: void 0,
-      sortDirection: void 0
+      minChapters: extractChapterCountField(query, SEARCH_FIELD_MIN_CHAPTERS),
+      maxChapters: extractChapterCountField(query, SEARCH_FIELD_MAX_CHAPTERS),
+      impossible: false
     };
-    var seenGenres = {};
     var includedTags = Array.isArray(query && query.includedTags) ? query.includedTags : [];
+    var excludedTags = Array.isArray(query && query.excludedTags) ? query.excludedTags : [];
 
     includedTags.forEach(function(tag) {
-      var tagId = String(tag && tag.id || "");
-      if (tagId.indexOf(SEARCH_TAG_PREFIX_GENRE) === 0) {
-        var genreId = tagId.slice(SEARCH_TAG_PREFIX_GENRE.length);
-        if (genreId.length > 0 && !seenGenres[genreId]) {
-          seenGenres[genreId] = true;
-          filters.genres.push(genreId);
-        }
-        return;
-      }
+      var id = String(tag && tag.id || "");
+      var value;
 
-      if (tagId.indexOf(SEARCH_TAG_PREFIX_STATUS) === 0 && filters.status === void 0) {
-        filters.status = tagId.slice(SEARCH_TAG_PREFIX_STATUS.length);
-        return;
-      }
-
-      if (tagId.indexOf(SEARCH_TAG_PREFIX_SORT) === 0 && filters.sortBy === void 0) {
-        var sortBy = tagId.slice(SEARCH_TAG_PREFIX_SORT.length);
-        if (getArchiveSortOption(sortBy)) {
-          filters.sortBy = sortBy;
-        }
-        return;
-      }
-
-      if (tagId.indexOf(SEARCH_TAG_PREFIX_ORDER) === 0 && filters.sortDirection === void 0) {
-        var sortDirection = tagId.slice(SEARCH_TAG_PREFIX_ORDER.length);
-        if (isArchiveOrderDirection(sortDirection)) {
-          filters.sortDirection = sortDirection;
-        }
+      if (id.indexOf(SEARCH_TAG_PREFIX_GENRE) === 0) {
+        pushUnique(filters.genresIn, id.slice(SEARCH_TAG_PREFIX_GENRE.length));
+      } else if (id.indexOf(SEARCH_TAG_PREFIX_TAG) === 0) {
+        pushUnique(filters.tagsIn, id.slice(SEARCH_TAG_PREFIX_TAG.length));
+      } else if (id.indexOf(SEARCH_TAG_PREFIX_STATUS) === 0) {
+        value = getOptionApiValue(STATUS_OPTIONS, id.slice(SEARCH_TAG_PREFIX_STATUS.length));
+        if (value) pushUnique(filters.statuses, value);
+      } else if (id.indexOf(SEARCH_TAG_PREFIX_ORIGIN) === 0) {
+        value = getOptionApiValue(ORIGIN_OPTIONS, id.slice(SEARCH_TAG_PREFIX_ORIGIN.length));
+        if (value) pushUnique(filters.origins, value);
+      } else if (id.indexOf(SEARCH_TAG_PREFIX_SORT) === 0 && filters.sortBy === void 0) {
+        value = getOptionApiValue(SORT_OPTIONS, id.slice(SEARCH_TAG_PREFIX_SORT.length));
+        if (value) filters.sortBy = value;
       }
     });
+
+    excludedTags.forEach(function(tag) {
+      var id = String(tag && tag.id || "");
+      var value;
+      if (id.indexOf(SEARCH_TAG_PREFIX_GENRE) === 0) {
+        pushUnique(filters.genresEx, id.slice(SEARCH_TAG_PREFIX_GENRE.length));
+      } else if (id.indexOf(SEARCH_TAG_PREFIX_TAG) === 0) {
+        pushUnique(filters.tagsEx, id.slice(SEARCH_TAG_PREFIX_TAG.length));
+      } else if (id.indexOf(SEARCH_TAG_PREFIX_STATUS) === 0) {
+        value = getOptionApiValue(STATUS_OPTIONS, id.slice(SEARCH_TAG_PREFIX_STATUS.length));
+        if (value) pushUnique(filters.statusesEx, value);
+      } else if (id.indexOf(SEARCH_TAG_PREFIX_ORIGIN) === 0) {
+        value = getOptionApiValue(ORIGIN_OPTIONS, id.slice(SEARCH_TAG_PREFIX_ORIGIN.length));
+        if (value) pushUnique(filters.originsEx, value);
+      }
+    });
+
+    var hadIncludedStatuses = filters.statuses.length > 0;
+    var hadIncludedOrigins = filters.origins.length > 0;
+    filters.statuses = resolveIncludedOptions(filters.statuses, filters.statusesEx, STATUS_OPTIONS);
+    filters.origins = resolveIncludedOptions(filters.origins, filters.originsEx, ORIGIN_OPTIONS);
+    if (filters.statusesEx.length >= STATUS_OPTIONS.length ||
+        filters.originsEx.length >= ORIGIN_OPTIONS.length ||
+        (hadIncludedStatuses && filters.statuses.length === 0) ||
+        (hadIncludedOrigins && filters.origins.length === 0)) {
+      filters.impossible = true;
+    }
 
     return filters;
   }
 
-  function hasActiveSearchFilters(filters) {
-    if (!filters || !isObject(filters)) {
-      return false;
+  function resolveIncludedOptions(included, excluded, options) {
+    var values = Array.isArray(included) ? included.slice() : [];
+    var excludedValues = Array.isArray(excluded) ? excluded : [];
+
+    if (values.length === 0 && excludedValues.length > 0) {
+      values = options.map(function(option) {
+        return option.apiValue;
+      });
     }
 
-    return (Array.isArray(filters.genres) && filters.genres.length > 0) ||
-      cleanText(filters.status).length > 0 ||
-      toPositiveInteger(filters.minChapters, 0) > 0 ||
-      hasArchiveSort(filters);
+    return values.filter(function(value) {
+      return excludedValues.indexOf(value) === -1;
+    });
   }
 
-  function hasArchiveSort(filters) {
-    return cleanText(filters && filters.sortBy).length > 0 ||
-      cleanText(filters && filters.sortDirection).length > 0;
-  }
-
-  function buildArchiveQueryParams(title, filters, page, perPage) {
-    var sortOption = getArchiveSortOption(filters && filters.sortBy) || getArchiveSortOption("latest_chapters");
-    var genreIds = Array.isArray(filters && filters.archiveGenreIds) ? filters.archiveGenreIds : [];
-    var minChapters = toPositiveInteger(filters && filters.minChapters, 0);
-    var params = {
-      page: toPositiveInteger(page, 1),
-      perPage: toPositiveInteger(perPage, SEARCH_PER_PAGE),
-      view: "archive",
-      seriesType: ARCHIVE_DEFAULT_SERIES_TYPES,
-      orderBy: sortOption.orderBy,
-      orderDirection: getArchiveOrderDirection(filters && filters.sortDirection, sortOption.defaultDirection)
-    };
-    var searchTerm = cleanText(title || "");
-    var seriesStatus = cleanText(filters && filters.status);
-
-    if (searchTerm.length > 0) {
-      params.searchTerm = searchTerm;
-    }
-    if (genreIds.length > 0) {
-      params.genreIds = genreIds.join(",");
-    }
-    if (seriesStatus.length > 0) {
-      params.seriesStatus = seriesStatus;
-    }
-    if (minChapters > 0) {
-      params.minChapters = minChapters;
-    }
-
-    return params;
-  }
-
-  function createMinimumChaptersSearchField() {
+  function createChapterCountSearchField(id, name, placeholder) {
     var field = {
-      id: SEARCH_FIELD_MIN_CHAPTERS,
-      name: "Minimum Chapters",
-      placeholder: "e.g. 10"
+      id: id,
+      name: name,
+      placeholder: placeholder
     };
     return typeof App !== "undefined" && App && typeof App.createSearchField === "function" ? App.createSearchField(field) : field;
   }
 
-  function extractMinimumChaptersFilterValue(query) {
+  function extractChapterCountField(query, fieldId) {
     var parameters = isObject(query && query.parameters) ? query.parameters : {};
-    var values = Array.isArray(parameters[SEARCH_FIELD_MIN_CHAPTERS]) ? parameters[SEARCH_FIELD_MIN_CHAPTERS] : [];
-    var rawValue = "";
-
+    var values = Array.isArray(parameters[fieldId]) ? parameters[fieldId] : [];
     for (var index = 0; index < values.length; index += 1) {
-      rawValue = cleanText(values[index]);
-      if (rawValue.length > 0) {
-        break;
+      var value = toPositiveInteger(cleanText(values[index]), 0);
+      if (value > 0) {
+        return value;
       }
     }
-
-    if (rawValue.length === 0) {
-      return void 0;
-    }
-    if (!/^\d+$/.test(rawValue)) {
-      throw new Error("Minimum Chapters must be a positive whole number.");
-    }
-
-    var minChapters = parseInt(rawValue, 10);
-    if (!isFinite(minChapters) || minChapters <= 0) {
-      throw new Error("Minimum Chapters must be a positive whole number.");
-    }
-
-    return minChapters;
+    return 0;
   }
 
-  function buildArchiveGenreIds(selectedGenres, seriesList) {
-    var selected = {};
-    var seen = {};
-    var ids = [];
-
-    (Array.isArray(selectedGenres) ? selectedGenres : []).forEach(function(genreId) {
-      selected[cleanText(genreId)] = true;
-    });
-
-    normalizeSeriesPayloads(seriesList).forEach(function(series) {
-      (Array.isArray(series.genres) ? series.genres : []).forEach(function(genre) {
-        var paperbackGenreId = getGenreOptionId(genre && genre.name);
-        var archiveGenreId = cleanText(genre && genre.id);
-        if (!selected[paperbackGenreId] || archiveGenreId.length === 0 || seen[archiveGenreId]) {
-          return;
-        }
-
-        seen[archiveGenreId] = true;
-        ids.push(archiveGenreId);
-      });
-    });
-
-    return ids;
-  }
-
-  function getArchiveSortOption(sortBy) {
-    var sortId = cleanText(sortBy || "");
-    for (var index = 0; index < ARCHIVE_SORT_OPTIONS.length; index += 1) {
-      if (ARCHIVE_SORT_OPTIONS[index].id === sortId) {
-        return ARCHIVE_SORT_OPTIONS[index];
+  function getOptionApiValue(options, id) {
+    var value = cleanText(id);
+    for (var index = 0; index < options.length; index += 1) {
+      if (options[index].id === value) {
+        return options[index].apiValue;
       }
     }
-    return null;
+    return "";
   }
 
-  function getArchiveOrderDirection(sortDirection, fallback) {
-    var direction = cleanText(sortDirection || "");
-    return isArchiveOrderDirection(direction) ? direction : fallback;
-  }
-
-  function isArchiveOrderDirection(sortDirection) {
-    return ARCHIVE_ORDER_OPTIONS.some(function(option) {
-      return option.id === sortDirection;
-    });
-  }
-
-  function extractGenreOptions(seriesList) {
+  function normalizeFacetOptions(values) {
     var deduped = {};
-
-    normalizeSeriesPayloads(seriesList).forEach(function(series) {
-      (Array.isArray(series.genres) ? series.genres : []).forEach(function(genre) {
-        var option = createGenreOption(genre);
-        if (!option) {
-          return;
-        }
-        deduped[option.id] = option;
-      });
-    });
-
-    return Object.keys(deduped).map(function(id) {
-      return deduped[id];
-    });
-  }
-
-  function extractNamedFilterOptions(seriesList, fieldName) {
-    var deduped = {};
-
-    normalizeSeriesPayloads(seriesList).forEach(function(series) {
-      var value = cleanText(series && series[fieldName]);
-      if (value.length === 0 || value.toUpperCase() === "NOVEL") {
+    (Array.isArray(values) ? values : []).forEach(function(entry) {
+      var rawName = cleanText(entry && entry.name);
+      var label = normalizeGenreLabel(rawName);
+      var id = cleanText(entry && entry.slug) || toSiteSlug(rawName);
+      var count = toNumber(entry && entry.count, 0);
+      if (rawName.length === 0 || label.length === 0 || id.length === 0 || count <= 0) {
         return;
       }
-
-      deduped[value] = {
-        id: value,
-        label: formatOptionLabel(value)
-      };
+      if (!deduped[id] || count > deduped[id].count) {
+        deduped[id] = {
+          id: id,
+          label: label,
+          apiValue: id,
+          count: count
+        };
+      }
     });
-
     return Object.keys(deduped).map(function(id) {
       return deduped[id];
-    });
-  }
-
-  function normalizeFilterOptions(options) {
-    return (Array.isArray(options) ? options : []).filter(function(option) {
-      return cleanText(option && option.id).length > 0 && cleanText(option && option.label).length > 0;
-    }).map(function(option) {
-      return {
-        id: cleanText(option.id),
-        label: cleanText(option.label)
-      };
     }).sort(function(left, right) {
       return left.label.localeCompare(right.label);
     });
   }
 
+  function getBrowseHasMore(meta, itemCount, currentPage, pageSize) {
+    if (meta && typeof meta.hasMore === "boolean") {
+      return meta.hasMore;
+    }
+    var totalPages = toPositiveInteger(meta && meta.totalPages, 0);
+    if (totalPages > 0) {
+      return totalPages > currentPage;
+    }
+    var total = toPositiveInteger(meta && meta.total, 0);
+    if (total > 0) {
+      return total > currentPage * pageSize;
+    }
+    return toPositiveInteger(itemCount, 0) >= pageSize;
+  }
+
+  function addParamIfPresent(params, key, value) {
+    var cleaned = cleanText(value);
+    if (cleaned.length > 0) {
+      params[key] = cleaned;
+    }
+  }
+
+  function addListParam(params, key, values) {
+    var cleaned = [];
+    (Array.isArray(values) ? values : []).forEach(function(value) {
+      var item = cleanText(value);
+      if (item.length > 0 && cleaned.indexOf(item) === -1) {
+        cleaned.push(item);
+      }
+    });
+    if (cleaned.length > 0) {
+      params[key] = cleaned.join(",");
+    }
+  }
+
+  function pushUnique(values, value) {
+    var cleaned = cleanText(value);
+    if (cleaned.length > 0 && values.indexOf(cleaned) === -1) {
+      values.push(cleaned);
+    }
+  }
+
   // Detail Helpers
 
-  function buildDetailTagSections(series) {
-    var deduped = {};
-    var genreTags = [];
-
-    (Array.isArray(series && series.genres) ? series.genres : []).forEach(function(genre) {
-      var option = createGenreOption(genre);
-      if (!option || deduped[option.id]) {
-        return;
-      }
-
-      deduped[option.id] = true;
-      genreTags.push(App.createTag({
-        id: SEARCH_TAG_PREFIX_GENRE + option.id,
-        label: option.label
-      }));
-    });
-
-    if (genreTags.length === 0) {
-      return [];
-    }
-
-    return [
-      App.createTagSection({
-        id: "genres",
-        label: "Genres",
-        tags: genreTags
-      })
-    ];
-  }
-
-  function resolveSeriesImage(series) {
-    var candidates = [
-      series && series.featuredImage,
-      series && series.featuredImageCL,
-      series && series.featuredLogo,
-      series && series.coverImage,
-      series && series.seriesImage,
-      series && series.bannerHero,
-      series && series.banner
-    ];
-
-    for (var index = 0; index < candidates.length; index += 1) {
-      var image = normalizeUrl(candidates[index] || "");
-      if (image.length > 0) {
-        return image;
-      }
-    }
-
-    return "";
-  }
-
-  function buildTitles(primaryTitle, alternativeTitles) {
+  function buildTitles(series) {
     var titles = [];
-    addUniqueTitle(titles, primaryTitle);
-
-    splitAlternativeTitles(alternativeTitles).forEach(function(title) {
+    addUniqueTitle(titles, series && series.title);
+    addUniqueTitle(titles, series && series.original_title);
+    (Array.isArray(series && series.alternative_titles) ? series.alternative_titles : []).forEach(function(title) {
       addUniqueTitle(titles, title);
     });
-
     return titles.length > 0 ? titles : ["Untitled"];
   }
 
   function addUniqueTitle(titles, value) {
-    var clean = cleanText(value || "");
-    if (clean.length > 0 && titles.indexOf(clean) === -1) {
-      titles.push(clean);
+    var title = cleanText(value);
+    if (title.length > 0 && titles.indexOf(title) === -1) {
+      titles.push(title);
     }
   }
 
-  function splitAlternativeTitles(value) {
-    return String(value || "").split(/\s*[,;\n\r\u2022]+\s*/).map(function(title) {
-      return cleanText(title);
-    }).filter(function(title) {
-      return title.length > 0;
+  function buildDetailTagSections(series) {
+    var sections = [];
+    var genreTags = buildDetailTags(series && series.genres, SEARCH_TAG_PREFIX_GENRE);
+    var seriesTags = buildDetailTags(series && series.tags, SEARCH_TAG_PREFIX_TAG);
+
+    if (genreTags.length > 0) {
+      sections.push(App.createTagSection({
+        id: "genres",
+        label: "Genres",
+        tags: genreTags
+      }));
+    }
+    if (seriesTags.length > 0) {
+      sections.push(App.createTagSection({
+        id: "tags",
+        label: "Tags",
+        tags: seriesTags
+      }));
+    }
+    return sections;
+  }
+
+  function buildDetailTags(values, prefix) {
+    var tags = [];
+    var seen = {};
+    (Array.isArray(values) ? values : []).forEach(function(name) {
+      var label = normalizeGenreLabel(name);
+      var id = toSiteSlug(name);
+      if (id.length === 0 || seen[id]) {
+        return;
+      }
+      seen[id] = true;
+      tags.push(App.createTag({
+        id: prefix + id,
+        label: label
+      }));
     });
-  }
-
-  function createGenreOption(genre) {
-    var label = normalizeGenreLabel(genre && genre.name);
-    var id = toOptionId(label);
-
-    if (id.length === 0 || label.length === 0) {
-      return null;
-    }
-
-    return {
-      id: id,
-      label: label
-    };
+    return tags;
   }
 
   function normalizeGenreLabel(value) {
-    var rawLabel = cleanText(value || "");
-    var key = toGenreNormalizationKey(rawLabel);
-
+    var raw = cleanText(value);
+    var key = toGenreNormalizationKey(raw);
     if (key.length === 0) {
       return "";
     }
-
     if (Object.prototype.hasOwnProperty.call(GENRE_LABEL_OVERRIDES, key)) {
       return GENRE_LABEL_OVERRIDES[key];
     }
-
-    return formatOptionLabel(rawLabel);
-  }
-
-  function getGenreOptionId(value) {
-    return toOptionId(normalizeGenreLabel(value));
+    return formatOptionLabel(raw);
   }
 
   function toGenreNormalizationKey(value) {
@@ -1338,6 +1042,16 @@
       .replace(/[^a-z0-9]+/g, " ")
       .trim()
       .replace(/\s+/g, " ");
+  }
+
+  function toSiteSlug(value) {
+    return cleanText(value).toLowerCase()
+      .replace(/[()]/g, "")
+      .replace(/\//g, "")
+      .replace(/[^a-z0-9\s-]+/g, "")
+      .replace(/\s+/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-+|-+$/g, "");
   }
 
   function mapStatus(status) {
@@ -1350,114 +1064,215 @@
 
   // Chapter Helpers
 
-  function compareChapterEntriesDesc(left, right) {
-    var leftNumber = toNumber(left && left.number, NaN);
-    var rightNumber = toNumber(right && right.number, NaN);
-
-    if (isFinite(leftNumber) && isFinite(rightNumber) && leftNumber !== rightNumber) {
-      return rightNumber - leftNumber;
-    }
-
-    var leftDate = parseDate(left && (left.updatedAt || left.createdAt)).getTime();
-    var rightDate = parseDate(right && (right.updatedAt || right.createdAt)).getTime();
-    if (leftDate !== rightDate) {
-      return rightDate - leftDate;
-    }
-
-    var leftSlug = cleanText(left && left.slug);
-    var rightSlug = cleanText(right && right.slug);
-    if (leftSlug < rightSlug) return 1;
-    if (leftSlug > rightSlug) return -1;
-    return 0;
-  }
-
-  function isDisplayChapter(chapter) {
-    return isObject(chapter) &&
-      typeof chapter.slug === "string" &&
-      chapter.slug.length > 0 &&
-      chapter.number !== void 0;
-  }
-
   function normalizeChapterEntries(chapters) {
-    var deduped = {};
-    var ordered = [];
-
+    var seen = {};
+    var normalized = [];
     (Array.isArray(chapters) ? chapters : []).forEach(function(chapter) {
-      if (!isDisplayChapter(chapter)) {
+      var number = toChapterNumber(chapter && chapter.number, NaN);
+      if (!isObject(chapter) || !isFinite(number)) {
         return;
       }
-
-      var slug = cleanText(chapter.slug);
-      if (slug.length === 0 || deduped[slug]) {
+      var key = String(number);
+      if (seen[key]) {
         return;
       }
-
-      deduped[slug] = true;
-      ordered.push(chapter);
+      seen[key] = true;
+      normalized.push(chapter);
     });
-
-    return ordered;
+    return normalized;
   }
 
-  function findFirstChapterPreview(chapters) {
-    var previewChapters = Array.isArray(chapters) ? chapters.filter(isDisplayChapter).slice().sort(compareChapterEntriesDesc) : [];
-    return previewChapters.length > 0 ? previewChapters[0] : null;
-  }
-
-  function getChapterAccessState(chapter) {
-    if (!isObject(chapter)) {
-      return CHAPTER_ACCESS_UNKNOWN;
-    }
-
-    if (chapter.isAccessible === true || chapter.isLocked === false) {
-      return CHAPTER_ACCESS_READABLE;
-    }
-
-    if (chapter.isAccessible === false ||
-      chapter.isLocked === true ||
-      chapter.isLockedByCoins === true ||
-      toNumber(chapter.isPermanentlyLocked, 0) > 0 ||
-      toNumber(chapter.finalPrice, toNumber(chapter.price, 0)) > 0) {
-      return CHAPTER_ACCESS_LOCKED;
-    }
-
-    return CHAPTER_ACCESS_UNKNOWN;
-  }
-
-  function shouldIncludeChapterForList(chapter, showLockedChapters) {
-    var accessState = getChapterAccessState(chapter);
-    if (accessState === CHAPTER_ACCESS_READABLE) {
-      return true;
-    }
-    if (accessState === CHAPTER_ACCESS_LOCKED) {
-      return showLockedChapters === true;
-    }
-    return false;
+  function compareChaptersDesc(left, right) {
+    return toChapterNumber(right && right.number, 0) - toChapterNumber(left && left.number, 0);
   }
 
   function buildChapterListName(chapter, fallbackNumber) {
-    return getChapterAccessState(chapter) === CHAPTER_ACCESS_LOCKED ?
-      buildLockedChapterLabel(chapter, fallbackNumber) :
-      buildReadableChapterLabel(chapter, fallbackNumber);
+    var name = buildReadableChapterLabel(chapter, fallbackNumber);
+    return chapter && chapter.is_premium === true ? LOCKED_CHAPTER_LABEL_PREFIX + name : name;
   }
 
   function buildReadableChapterLabel(chapter, fallbackNumber) {
-    var chapterNumber = toChapterNumber(chapter && chapter.number, fallbackNumber);
-    var title = cleanText(chapter && chapter.title || "");
-    var normalizedTitle = normalizeSearchText(title);
-    if (title.length > 0 && normalizedTitle !== "chapter " + String(chapterNumber).toLowerCase()) {
-      return "Chapter " + chapterNumber + ": " + title;
+    var number = toChapterNumber(chapter && chapter.number, fallbackNumber);
+    var title = cleanText(chapter && chapter.title);
+    var defaultTitle = "chapter " + String(number).toLowerCase();
+    if (title.length > 0 && title.toLowerCase() !== defaultTitle) {
+      return "Chapter " + number + ": " + title;
     }
-    return "Chapter " + chapterNumber;
+    return "Chapter " + number;
   }
 
-  function buildLockedChapterLabel(chapter, fallbackNumber) {
-    return LOCKED_CHAPTER_LABEL_PREFIX + buildReadableChapterLabel(chapter, fallbackNumber);
+  function extractReaderChapter(html, chapterNumber) {
+    var chunks = decodeNextFlightChunks(html);
+    var candidates = [];
+    for (var index = 0; index < chunks.length; index += 1) {
+      candidates = candidates.concat(extractJsonObjectValues(chunks[index], "chapter"));
+    }
+
+    for (var candidateIndex = 0; candidateIndex < candidates.length; candidateIndex += 1) {
+      var candidate = candidates[candidateIndex];
+      if (isObject(candidate) && Array.isArray(candidate.pages) && toChapterNumber(candidate.number, NaN) === chapterNumber) {
+        return candidate;
+      }
+    }
+    return null;
+  }
+
+  function extractReaderChapterIds(html, currentChapter) {
+    var chunks = decodeNextFlightChunks(html);
+    var chapterIds = {};
+
+    for (var index = 0; index < chunks.length; index += 1) {
+      var arrays = extractJsonArrayValues(chunks[index], "allChapters");
+      arrays.forEach(function(chapters) {
+        chapters.forEach(function(chapter) {
+          var number = toChapterNumber(chapter && chapter.number, NaN);
+          var id = cleanText(chapter && chapter.id);
+          if (isFinite(number) && id.length > 0) {
+            chapterIds[String(number)] = id;
+          }
+        });
+      });
+    }
+
+    var currentNumber = toChapterNumber(currentChapter && currentChapter.number, NaN);
+    var currentId = cleanText(currentChapter && currentChapter.id);
+    if (isFinite(currentNumber) && currentId.length > 0) {
+      chapterIds[String(currentNumber)] = currentId;
+    }
+    return chapterIds;
+  }
+
+  function normalizeReaderPages(pages) {
+    return (Array.isArray(pages) ? pages : []).filter(function(page) {
+      return isObject(page) && page.isRedacted !== true && cleanText(page.imageUrl).length > 0;
+    }).slice().sort(function(left, right) {
+      return toNumber(left.pageNumber, 0) - toNumber(right.pageNumber, 0);
+    }).map(function(page) {
+      return normalizeUrl(page.imageUrl);
+    }).filter(function(url) {
+      return url.length > 0;
+    });
+  }
+
+  function hasRedactedReaderPages(pages) {
+    var list = Array.isArray(pages) ? pages : [];
+    return list.some(function(page) {
+      return isObject(page) && page.isRedacted === true;
+    });
+  }
+
+  function isReaderChapterRedacted(chapter) {
+    return isObject(chapter) && hasRedactedReaderPages(chapter.pages);
+  }
+
+  function isChapterNotFoundPage(html) {
+    return /<title[^>]*>\s*chapter\s+not\s+found\b/i.test(String(html || ""));
+  }
+
+  function createLockedChapterError() {
+    var error = new Error("This chapter is locked on DivaScans and cannot be loaded in Paperback.");
+    error.divaScansLockedChapter = true;
+    return error;
+  }
+
+  function isLockedChapterError(error) {
+    return isObject(error) && error.divaScansLockedChapter === true;
+  }
+
+  function decodeNextFlightChunks(html) {
+    var chunks = [];
+    var source = String(html || "");
+    var marker = "self.__next_f.push(";
+    var start = 0;
+
+    while (start < source.length) {
+      var markerIndex = source.indexOf(marker, start);
+      if (markerIndex === -1) {
+        break;
+      }
+      var payload = extractJsonValueAtIndex(source, markerIndex + marker.length);
+      if (Array.isArray(payload) && payload[0] === 1 && typeof payload[1] === "string") {
+        chunks.push(payload[1]);
+      }
+      start = markerIndex + marker.length;
+    }
+    return chunks;
+  }
+
+  function extractJsonObjectValues(source, key) {
+    return extractJsonValues(source, key, false);
+  }
+
+  function extractJsonArrayValues(source, key) {
+    return extractJsonValues(source, key, true);
+  }
+
+  function extractJsonValues(source, key, arraysOnly) {
+    var results = [];
+    var marker = '"' + String(key || "") + '":';
+    var start = 0;
+    while (start < source.length) {
+      var markerIndex = source.indexOf(marker, start);
+      if (markerIndex === -1) {
+        break;
+      }
+      var value = extractJsonValueAtIndex(source, markerIndex + marker.length);
+      if ((arraysOnly && Array.isArray(value)) || (!arraysOnly && isObject(value) && !Array.isArray(value))) {
+        results.push(value);
+      }
+      start = markerIndex + marker.length;
+    }
+    return results;
+  }
+
+  function extractJsonValueAtIndex(source, valueIndex) {
+    var index = valueIndex;
+    while (index < source.length && /\s/.test(source.charAt(index))) {
+      index += 1;
+    }
+    var open = source.charAt(index);
+    var close = open === "{" ? "}" : open === "[" ? "]" : "";
+    if (close.length === 0) {
+      return null;
+    }
+
+    var depth = 0;
+    var inString = false;
+    var escaped = false;
+    for (var charIndex = index; charIndex < source.length; charIndex += 1) {
+      var character = source.charAt(charIndex);
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (character === "\\") {
+          escaped = true;
+        } else if (character === '"') {
+          inString = false;
+        }
+        continue;
+      }
+      if (character === '"') {
+        inString = true;
+        continue;
+      }
+      if (character === open) {
+        depth += 1;
+      } else if (character === close) {
+        depth -= 1;
+        if (depth === 0) {
+          try {
+            return JSON.parse(source.slice(index, charIndex + 1));
+          } catch (error) {
+            return null;
+          }
+        }
+      }
+    }
+    return null;
   }
 
   async function getShowLockedChapters(stateManager) {
-    var stored = await stateManager.retrieve(STATE_SHOW_LOCKED_CHAPTERS);
-    return stored === true;
+    return await stateManager.retrieve(STATE_SHOW_LOCKED_CHAPTERS) === true;
   }
 
   // Generic Utilities
@@ -1495,7 +1310,6 @@
     if (!isFinite(code) || code <= 0) {
       return "";
     }
-
     try {
       return typeof String.fromCodePoint === "function" ? String.fromCodePoint(code) : String.fromCharCode(code);
     } catch (error) {
@@ -1504,21 +1318,17 @@
   }
 
   function normalizeUrl(value) {
-    var clean = cleanText(value || "");
-    if (clean.length === 0) {
+    var url = cleanText(value);
+    if (url.length === 0) {
       return "";
     }
-    return clean.replace("/public//", "/public/");
-  }
-
-  function normalizeSearchText(value) {
-    return cleanText(value || "").toLowerCase();
-  }
-
-  function toOptionId(value) {
-    return normalizeSearchText(value)
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "");
+    if (url.indexOf("//") === 0) {
+      return "https:" + url;
+    }
+    if (url.charAt(0) === "/") {
+      return DOMAIN + url;
+    }
+    return url;
   }
 
   function formatOptionLabel(value) {
@@ -1535,10 +1345,7 @@
   function toTitleCase(value) {
     return String(value || "").split(/\s+/).map(function(word) {
       return word.split("-").map(function(part) {
-        if (part.length === 0) {
-          return part;
-        }
-        return part.charAt(0).toUpperCase() + part.slice(1).toLowerCase();
+        return part.length > 0 ? part.charAt(0).toUpperCase() + part.slice(1).toLowerCase() : part;
       }).join("-");
     }).join(" ").trim();
   }
@@ -1557,13 +1364,31 @@
     if (value === null || value === void 0 || value === "") {
       return fallback;
     }
-
     return toNumber(value, fallback);
   }
 
   function emptyToUndefined(value) {
-    var clean = cleanText(value || "");
+    var clean = cleanText(value);
     return clean.length > 0 ? clean : void 0;
+  }
+
+  function touchCacheKey(order, key) {
+    var index = order.indexOf(key);
+    if (index !== -1) {
+      order.splice(index, 1);
+    }
+    order.push(key);
+  }
+
+  function storeBoundedCacheEntry(cache, order, key, entry, limit) {
+    cache[key] = entry;
+    touchCacheKey(order, key);
+    while (order.length > limit) {
+      var oldest = order.shift();
+      if (oldest !== void 0 && oldest !== key) {
+        delete cache[oldest];
+      }
+    }
   }
 
   function isObject(value) {
