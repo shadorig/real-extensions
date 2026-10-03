@@ -1,5 +1,5 @@
 {
-  "buildTime": "2026-10-03T13:01:17.807Z",
+  "buildTime": "2026-10-03T19:04:15.808Z",
   "sources": [
     {
       "id": "QiScans",
@@ -18,14 +18,14 @@
       "id": "ElfToon",
       "name": "ElfToon",
       "author": "real",
-      "desc": "Extension that pulls series from https://elftoon.com",
+      "desc": "Extension that pulls series from https://elftoon.net",
       "website": "https://github.com/shadorig/real-extensions",
       "contentRating": "MATURE",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "icon": "icon.png",
       "tags": [],
-      "websiteBaseURL": "https://elftoon.com",
-      "intents": 53
+      "websiteBaseURL": "https://elftoon.net",
+      "intents": 37
     },
     {
       "id": "HiveToon",
