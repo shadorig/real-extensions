@@ -14,6 +14,10 @@
   var CONTENT_RATING_MATURE = "MATURE";
   var SEARCH_PER_PAGE = 24;
   var HOME_LATEST_PER_PAGE = 24;
+  var BROWSE_CACHE_MS = 5 * 60 * 1000;
+  var LATEST_CACHE_MS = 2 * 60 * 1000;
+  var SERIES_PAGE_CACHE_MS = 60 * 1000;
+  var SERIES_PAGE_CACHE_LIMIT = 24;
 
   var SECTION_ID_FEATURED = "featured";
   var SECTION_ID_TRENDING = "trending";
@@ -58,7 +62,7 @@
   // Source Info
 
   var ErisScansInfo = {
-    version: "1.1.0",
+    version: "1.1.1",
     name: "ErisScans",
     description: "Extension that pulls series from " + DOMAIN,
     author: "real",
@@ -97,13 +101,13 @@
 
     this.stateManager = App.createSourceStateManager();
     this.cachedBrowseSeries = null;
+    this.cachedBrowseSeriesExpiresAt = 0;
     this.cachedBrowseSeriesRequest = null;
-    this.cachedFilterData = null;
     this.cachedSeriesPages = {};
+    this.cachedSeriesPageOrder = [];
     this.cachedSeriesPageRequests = {};
-    this.cachedSeriesIndexHtml = null;
-    this.cachedSeriesIndexHtmlRequest = null;
     this.cachedLatestPosterItems = null;
+    this.cachedLatestPosterItemsExpiresAt = 0;
     this.cachedLatestPosterItemsRequest = null;
   }
 
@@ -126,12 +130,9 @@
   };
 
   ErisScans.prototype.getHomePageSections = async function(sectionCallback) {
-    var results = await Promise.all([
-      this.fetchText(DOMAIN + "/"),
-      this.getLatestSectionItems(1)
-    ]);
-    var html = results[0];
-    var latestResults = results[1];
+    var html = await this.fetchText(DOMAIN + "/");
+    var latestSectionHtml = extractHomeSectionHtml(html, "Latest Updates");
+    var latestItems = parseLatestPosterItems(latestSectionHtml);
     var sections = [
       createHomeSection(
         SECTION_ID_FEATURED,
@@ -158,8 +159,8 @@
         SECTION_ID_LATEST,
         "Latest Updates",
         "singleRowNormal",
-        latestResults.results,
-        latestResults.metadata !== void 0
+        latestItems,
+        hasLatestViewMoreLink(latestSectionHtml)
       ),
       createHomeSection(
         SECTION_ID_RECENT,
@@ -231,11 +232,7 @@
   };
 
   ErisScans.prototype.getSearchTags = async function() {
-    if (!this.cachedFilterData) {
-      this.cachedFilterData = await this.fetchFilterData();
-    }
-
-    return buildSearchTagSections(this.cachedFilterData);
+    return buildSearchTagSections(await this.fetchFilterData());
   };
 
   ErisScans.prototype.getMangaDetails = async function(seriesId) {
@@ -316,7 +313,7 @@
   // Source-Specific Fetch Helpers
 
   ErisScans.prototype.fetchAllBrowseSeries = async function() {
-    if (Array.isArray(this.cachedBrowseSeries)) {
+    if (Array.isArray(this.cachedBrowseSeries) && Date.now() < this.cachedBrowseSeriesExpiresAt) {
       return this.cachedBrowseSeries;
     }
 
@@ -325,7 +322,13 @@
     }
 
     this.cachedBrowseSeriesRequest = this.fetchText(DOMAIN + "/search_series").then(function(html) {
-      this.cachedBrowseSeries = parseBrowseSeriesEntries(html);
+      var parsedSeries = parseBrowseSeriesEntries(html);
+      if (containsSeriesLinks(html) && parsedSeries.length === 0) {
+        throw new Error("ErisScans series catalog markup changed and could not be parsed.");
+      }
+
+      this.cachedBrowseSeries = parsedSeries;
+      this.cachedBrowseSeriesExpiresAt = Date.now() + BROWSE_CACHE_MS;
       this.cachedBrowseSeriesRequest = null;
       return this.cachedBrowseSeries;
     }.bind(this)).catch(function(error) {
@@ -345,7 +348,7 @@
   };
 
   ErisScans.prototype.fetchAllLatestPosterItems = async function() {
-    if (Array.isArray(this.cachedLatestPosterItems)) {
+    if (Array.isArray(this.cachedLatestPosterItems) && Date.now() < this.cachedLatestPosterItemsExpiresAt) {
       return this.cachedLatestPosterItems;
     }
 
@@ -355,6 +358,7 @@
 
     this.cachedLatestPosterItemsRequest = this.fetchText(DOMAIN + "/latest/").then(function(html) {
       this.cachedLatestPosterItems = parseLatestPosterItems(extractHomeSectionHtml(html, "Latest Updates"));
+      this.cachedLatestPosterItemsExpiresAt = Date.now() + LATEST_CACHE_MS;
       this.cachedLatestPosterItemsRequest = null;
       return this.cachedLatestPosterItems;
     }.bind(this)).catch(function(error) {
@@ -366,33 +370,40 @@
   };
 
   ErisScans.prototype.fetchFilterData = async function() {
-    var results = await Promise.all([
-      this.fetchSeriesIndexHtml(),
-      this.fetchAllBrowseSeries()
-    ]);
-    var seriesIndexHtml = results[0];
-    var allSeries = results[1];
-    var genreOptions = extractDropdownFilterOptions(seriesIndexHtml, "genre");
-    var statusOptions = extractDropdownFilterOptions(seriesIndexHtml, "status");
-    var typeOptions = extractDropdownFilterOptions(seriesIndexHtml, "type").filter(isSupportedTypeOption);
+    var allSeries = await this.fetchAllBrowseSeries();
 
     return {
-      genres: genreOptions.length > 0 ? genreOptions : extractGenreOptions(allSeries),
-      statuses: statusOptions.length > 0 ? statusOptions : DEFAULT_STATUS_OPTIONS,
-      types: typeOptions.length > 0 ? typeOptions : DEFAULT_TYPE_OPTIONS
+      genres: extractGenreOptions(allSeries),
+      statuses: mergeFilterOptions(DEFAULT_STATUS_OPTIONS, extractSeriesFieldOptions(allSeries, "statusId", "statusLabel")),
+      types: mergeFilterOptions(
+        DEFAULT_TYPE_OPTIONS,
+        extractSeriesFieldOptions(allSeries, "typeId", "typeLabel").filter(isSupportedTypeOption)
+      )
     };
   };
 
   ErisScans.prototype.getSeriesPageHtml = async function(seriesId) {
     var cacheKey = cleanText(seriesId || "");
+    if (cacheKey.length === 0) {
+      throw new Error("ErisScans requires a series id.");
+    }
 
-    if (typeof this.cachedSeriesPages[cacheKey] === "string") {
-      return this.cachedSeriesPages[cacheKey];
+    var cached = this.cachedSeriesPages[cacheKey];
+
+    if (cached && Date.now() < cached.expiresAt) {
+      touchCacheKey(this.cachedSeriesPageOrder, cacheKey);
+      return cached.value;
     }
 
     if (!this.cachedSeriesPageRequests[cacheKey]) {
       this.cachedSeriesPageRequests[cacheKey] = this.fetchText(this.getMangaShareUrl(cacheKey)).then(function(html) {
-        this.cachedSeriesPages[cacheKey] = html;
+        storeBoundedCacheEntry(
+          this.cachedSeriesPages,
+          this.cachedSeriesPageOrder,
+          cacheKey,
+          { value: html, expiresAt: Date.now() + SERIES_PAGE_CACHE_MS },
+          SERIES_PAGE_CACHE_LIMIT
+        );
         delete this.cachedSeriesPageRequests[cacheKey];
         return html;
       }.bind(this)).catch(function(error) {
@@ -402,27 +413,6 @@
     }
 
     return this.cachedSeriesPageRequests[cacheKey];
-  };
-
-  ErisScans.prototype.fetchSeriesIndexHtml = async function() {
-    if (typeof this.cachedSeriesIndexHtml === "string" && this.cachedSeriesIndexHtml.length > 0) {
-      return this.cachedSeriesIndexHtml;
-    }
-
-    if (this.cachedSeriesIndexHtmlRequest) {
-      return this.cachedSeriesIndexHtmlRequest;
-    }
-
-    this.cachedSeriesIndexHtmlRequest = this.fetchText(DOMAIN + "/series/").then(function(html) {
-      this.cachedSeriesIndexHtml = html;
-      this.cachedSeriesIndexHtmlRequest = null;
-      return html;
-    }.bind(this)).catch(function(error) {
-      this.cachedSeriesIndexHtmlRequest = null;
-      throw error;
-    }.bind(this));
-
-    return this.cachedSeriesIndexHtmlRequest;
   };
 
   ErisScans.prototype.fetchText = async function(url) {
@@ -517,7 +507,8 @@
       var openTagMatch = block.match(/^<button\b[^>]*>/i);
       var openTag = openTagMatch ? openTagMatch[0] : "";
       var seriesId = cleanText(extractHtmlAttribute(openTag, "id"));
-      var seriesUrl = normalizeUrl(extractMatch(block, /<a[^>]*href="(\/series\/[^"]+\/?)"/i, 1));
+      var seriesAnchor = extractFirstSeriesAnchorTag(block);
+      var seriesUrl = normalizeUrl(extractHtmlAttribute(seriesAnchor, "href"));
 
       if (seriesId.length === 0 && seriesUrl.length > 0) {
         seriesId = extractSeriesId(seriesUrl);
@@ -662,12 +653,16 @@
   function parseFeaturedHomeItems(html) {
     var items = [];
     var seen = {};
-    var sectionHtml = sliceBetween(html, /<section class="splide series-splide/i, /<\/section>/i);
-    var anchorRegex = /<a\b[^>]*class="[^"]*splide__slide[^"]*"[^>]*>[\s\S]*?<\/a>/gi;
+    var sectionHtml = extractElementHtmlByClass(html, "section", "series-splide");
+    var anchorRegex = /<a\b[^>]*>[\s\S]*?<\/a>/gi;
     var match;
 
     while ((match = anchorRegex.exec(sectionHtml)) !== null) {
       var block = match[0];
+      if (!hasHtmlClass(block, "splide__slide")) {
+        continue;
+      }
+
       var url = normalizeUrl(extractHtmlAttribute(block, "href"));
       var seriesId = extractSeriesId(url);
       if (seriesId.length === 0 || seen[seriesId]) {
@@ -692,40 +687,53 @@
 
   function extractHomeSectionHtml(html, title) {
     var value = String(html || "");
-    var sectionHeadingPattern = new RegExp("<h2[^>]*>\\s*" + escapeRegex(title) + "\\s*<\\/h2>", "i");
-    var match = sectionHeadingPattern.exec(value);
+    var expectedTitle = cleanText(title).toLowerCase();
+    var headingRegex = /<h2\b[^>]*>[\s\S]*?<\/h2>/gi;
+    var match;
 
-    if (!match) {
-      return "";
+    while ((match = headingRegex.exec(value)) !== null) {
+      if (cleanText(match[0]).toLowerCase() !== expectedTitle) {
+        continue;
+      }
+
+      var sectionStart = headingRegex.lastIndex;
+      var nextHeading = headingRegex.exec(value);
+      return value.slice(sectionStart, nextHeading ? nextHeading.index : value.length);
     }
 
-    var sectionHtml = value.slice(match.index + match[0].length);
-    var nextHeadingMatch = sectionHtml.match(/<h2[^>]*>[\s\S]*?<\/h2>/i);
-    return nextHeadingMatch ? sectionHtml.slice(0, nextHeadingMatch.index) : sectionHtml;
+    return "";
+  }
+
+  function hasLatestViewMoreLink(html) {
+    return hasAnchorPath(html, "/latest") || hasAnchorPath(html, "/latest/");
   }
 
   function parseLatestPosterItems(html) {
     var items = [];
     var seen = {};
-    var blockRegex = /<div[^>]*class="group latest-poster[^"]*"[\s\S]*?(?=<div[^>]*class="group latest-poster[^"]*"|$)/gi;
-    var match;
+    var blocks = extractBlocksByClass(html, "div", "latest-poster");
 
-    while ((match = blockRegex.exec(String(html || ""))) !== null) {
-      var block = match[0];
-      var seriesUrl = normalizeUrl(extractMatch(block, /<a[^>]*href="(\/series\/[^"]+\/?)"[^>]*title="([^"]*)"/i, 1));
+    blocks.forEach(function(block) {
+      var seriesAnchor = extractFirstSeriesAnchorTag(block);
+      var seriesUrl = normalizeUrl(extractHtmlAttribute(seriesAnchor, "href"));
       var seriesId = extractSeriesId(seriesUrl);
 
       if (seriesId.length === 0 || seen[seriesId]) {
-        continue;
+        return;
+      }
+
+      var title = cleanText(extractMatch(block, /<h3[^>]*>([\s\S]*?)<\/h3>/i, 1)) || cleanText(extractHtmlAttribute(seriesAnchor, "title")) || cleanText(extractHtmlAttribute(seriesAnchor, "alt"));
+      if (title.length === 0) {
+        return;
       }
 
       seen[seriesId] = true;
       items.push(createPartialSeries({
         id: seriesId,
-        title: cleanText(extractMatch(block, /<h3[^>]*>([\s\S]*?)<\/h3>/i, 1)) || cleanText(extractMatch(block, /<a[^>]*href="\/series\/[^"]+\/?"[^>]*title="([^"]*)"/i, 1)),
+        title: title,
         image: normalizeCssUrl(extractMatch(block, /background-image:\s*url\(([^)]+)\)/i, 1))
       }, buildLatestPosterSubtitle(block)));
-    }
+    });
 
     return items;
   }
@@ -749,11 +757,17 @@
 
   function extractLatestPosterChapterEntries(block) {
     var entries = [];
-    var regex = /<a[^>]*href="\/chapter\/[^"]+\/?"[^>]*>([\s\S]*?)<\/a>/gi;
+    var regex = /<a\b[^>]*>[\s\S]*?<\/a>/gi;
     var match;
 
     while ((match = regex.exec(String(block || ""))) !== null) {
       var entryHtml = match[0];
+      var openTag = extractOpeningTag(entryHtml);
+      var href = extractHtmlAttribute(openTag, "href");
+      if (!isPathPrefix(href, "/chapter/")) {
+        continue;
+      }
+
       var label = extractChapterEntryLabel(entryHtml, /<div class="truncate[^"]*">\s*([\s\S]*?)\s*<\/div>/i);
 
       if (label.length === 0) {
@@ -764,7 +778,7 @@
         label: label,
         isLocked: isLockedChapterEntryHtml(entryHtml),
         coinCost: extractLockedChapterCoinCost(entryHtml),
-        dateLabel: cleanText(extractHtmlAttribute(entryHtml, "d"))
+        dateLabel: cleanText(extractHtmlAttribute(openTag, "d"))
       });
     }
 
@@ -773,7 +787,7 @@
 
   function extractChapterEntryLabel(entryHtml, visibleLabelPattern) {
     var visibleLabel = extractMatch(entryHtml, visibleLabelPattern, 1);
-    var titleLabel = extractHtmlAttribute(entryHtml, "title");
+    var titleLabel = extractHtmlAttribute(extractOpeningTag(entryHtml), "title");
     return chooseMoreInformativeChapterLabel(visibleLabel, titleLabel);
   }
 
@@ -977,6 +991,50 @@
     }));
   }
 
+  function extractSeriesFieldOptions(seriesList, idField, labelField) {
+    var deduped = {};
+
+    (Array.isArray(seriesList) ? seriesList : []).forEach(function(series) {
+      var id = cleanText(series && series[idField]).toLowerCase();
+      var label = cleanText(series && series[labelField]);
+      if (id.length === 0 || label.length === 0 || deduped[id]) {
+        return;
+      }
+
+      deduped[id] = {
+        id: id,
+        label: label
+      };
+    });
+
+    return sortFilterOptions(Object.keys(deduped).map(function(key) {
+      return deduped[key];
+    }));
+  }
+
+  function mergeFilterOptions(primary, secondary) {
+    var deduped = {};
+
+    [primary, secondary].forEach(function(options) {
+      (Array.isArray(options) ? options : []).forEach(function(option) {
+        var id = cleanText(option && option.id).toLowerCase();
+        var label = cleanText(option && option.label);
+        if (id.length === 0 || label.length === 0 || deduped[id]) {
+          return;
+        }
+
+        deduped[id] = {
+          id: id,
+          label: label
+        };
+      });
+    });
+
+    return sortFilterOptions(Object.keys(deduped).map(function(key) {
+      return deduped[key];
+    }));
+  }
+
   function normalizeFilterOptions(options) {
     return sortFilterOptions((Array.isArray(options) ? options : []).map(function(option) {
       return {
@@ -994,34 +1052,6 @@
     });
   }
 
-  function extractDropdownFilterOptions(html, filterType) {
-    var pattern = new RegExp(
-      'initializeDropdownMenu\\(\\{\\s*type:\\s*"' + escapeRegex(filterType) + '"[\\s\\S]*?items:\\s*\\[([\\s\\S]*?)\\]\\s*\\}\\);',
-      "i"
-    );
-    var block = extractMatch(html, pattern, 1);
-    var options = [];
-    var seen = {};
-    var itemRegex = /value:\s*"([^"]+)"\s*,\s*displayName:\s*"([^"]+)"/gi;
-    var match;
-
-    while ((match = itemRegex.exec(block)) !== null) {
-      var label = filterType === "genre" ? normalizeGenreLabel(match[2]) : formatOptionLabel(match[2]);
-      var id = filterType === "genre" ? normalizeOptionId(label) : normalizeOptionId(match[1]);
-      if (id.length === 0 || label.length === 0 || seen[id]) {
-        continue;
-      }
-
-      seen[id] = true;
-      options.push({
-        id: id,
-        label: label
-      });
-    }
-
-    return sortFilterOptions(options);
-  }
-
   function isSupportedTypeOption(option) {
     return !isExcludedSeriesTypeId(option && option.id);
   }
@@ -1029,14 +1059,14 @@
   // Detail Helpers
 
   function parseSeriesDetails(html) {
-    var metaHtml = sliceBetween(html, /<h1\b/i, /<div id="expand_content"/i);
+    var metaHtml = sliceBetween(html, /<h1\b/i, /<div\b[^>]*\bid=(['"])expand_content\1[^>]*>/i);
     var status = extractInfoChip(metaHtml, "Status");
     var type = extractInfoChip(metaHtml, "Series Type");
 
     return {
-      title: cleanText(extractMatch(metaHtml, /<h1[^>]*>([\s\S]*?)<\/h1>/i, 1)) || cleanText(extractMatch(html, /<meta property="og:title" content="([^"]+)"/i, 1)),
+      title: cleanText(extractMatch(metaHtml, /<h1[^>]*>([\s\S]*?)<\/h1>/i, 1)) || cleanText(extractMetaContent(html, "og:title")),
       alternativeTitles: extractAlternativeTitles(metaHtml),
-      image: normalizeUrl(extractMatch(html, /<meta property="og:image" content="([^"]+)"/i, 1)) || normalizeCssUrl(extractMatch(metaHtml, /background-image:\s*url\(([^)]+)\)/i, 1)),
+      image: normalizeUrl(extractMetaContent(html, "og:image")) || normalizeCssUrl(extractMatch(metaHtml, /background-image:\s*url\(([^)]+)\)/i, 1)),
       description: extractSeriesDescription(html),
       author: extractInfoChip(metaHtml, "Author"),
       artist: extractInfoChip(metaHtml, "Artist"),
@@ -1051,8 +1081,8 @@
   }
 
   function extractSeriesDescription(html) {
-    var detailsHtml = sliceBetween(html, /<h1\b/i, /<a[^>]*alt="Start Reading"/i) || String(html || "");
-    var description = cleanText(extractMatch(detailsHtml, /<div id="expand_content"[^>]*>[\s\S]*?<p[^>]*>([\s\S]*?)<\/p>/i, 1));
+    var detailsHtml = sliceBetween(html, /<h1\b/i, /<a\b[^>]*(?:alt|title)=(['"])Start Reading\1[^>]*>/i) || String(html || "");
+    var description = cleanText(extractMatch(detailsHtml, /<div\b[^>]*\bid=(['"])expand_content\1[^>]*>[\s\S]*?<p[^>]*>([\s\S]*?)<\/p>/i, 2));
 
     if (description.length > 0) {
       return description;
@@ -1064,16 +1094,16 @@
   function extractAlternativeTitles(html) {
     var block = extractMatch(
       html,
-      /<div class="text-lg font-medium">\s*Alternative titles\s*<\/div>\s*<div[^>]*>([\s\S]*?)<\/div>/i,
+      /<div\b[^>]*>\s*Alternative titles\s*<\/div>\s*<div[^>]*>([\s\S]*?)<\/div>/i,
       1
     );
     var titles = [];
     var seen = {};
-    var spanRegex = /<span[^>]*class="select-all"[^>]*>([\s\S]*?)<\/span>/gi;
+    var spanRegex = /<span\b[^>]*class=(['"])[^'"]*\bselect-all\b[^'"]*\1[^>]*>([\s\S]*?)<\/span>/gi;
     var match;
 
     while ((match = spanRegex.exec(block)) !== null) {
-      var title = cleanText(match[1]);
+      var title = cleanText(match[2]);
       var key = title.toLowerCase();
       if (title.length === 0 || seen[key]) {
         continue;
@@ -1092,20 +1122,26 @@
 
   function extractInfoChip(html, label) {
     var pattern = new RegExp(
-      '<(?:a|div)[^>]*(?:alt|title)="' + escapeRegex(label) + '"[^>]*>([\\s\\S]*?)<\\/(?:a|div)>',
+      '<(?:a|div)\\b[^>]*(?:alt|title)=([\'\"])' + escapeRegex(label) + '\\1[^>]*>([\\s\\S]*?)<\\/(?:a|div)>',
       "i"
     );
-    return cleanText(extractMatch(html, pattern, 1));
+    return cleanText(extractMatch(html, pattern, 2));
   }
 
   function extractDetailGenres(html) {
     var genres = [];
     var seen = {};
-    var regex = /<a[^>]*href="\/series\/\?genre=[^"]+"[^>]*title="([^"]+)"[^>]*>/gi;
+    var regex = /<a\b[^>]*>/gi;
     var match;
 
     while ((match = regex.exec(String(html || ""))) !== null) {
-      var label = normalizeGenreLabel(match[1]);
+      var tag = match[0];
+      var href = extractHtmlAttribute(tag, "href");
+      if (normalizeUrl(href).indexOf(DOMAIN + "/series/?genre=") !== 0) {
+        continue;
+      }
+
+      var label = normalizeGenreLabel(extractHtmlAttribute(tag, "title") || extractHtmlAttribute(tag, "alt"));
       var id = normalizeOptionId(label);
       if (id.length === 0 || seen[id]) {
         continue;
@@ -1237,12 +1273,22 @@
   function parseChapterEntries(html) {
     var entries = [];
     var seen = {};
-    var regex = /<a\s+[^>]*href="(\/chapter\/[^"]+\/?)"[^>]*\bd="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+    var chapterListHtml = extractElementHtmlById(html, "div", "chapters");
+    var sourceHtml = chapterListHtml || String(html || "");
+    var requireDateFallback = chapterListHtml.length === 0;
+    var regex = /<a\b[^>]*>[\s\S]*?<\/a>/gi;
     var match;
 
-    while ((match = regex.exec(String(html || ""))) !== null) {
+    while ((match = regex.exec(sourceHtml)) !== null) {
       var block = match[0];
-      var chapterId = extractLastPathComponent(normalizeUrl(match[1]));
+      var openTag = extractOpeningTag(block);
+      var href = extractHtmlAttribute(openTag, "href");
+      var dateLabel = extractHtmlAttribute(openTag, "d");
+      if (!isPathPrefix(href, "/chapter/") || (requireDateFallback && cleanText(dateLabel).length === 0)) {
+        continue;
+      }
+
+      var chapterId = extractLastPathComponent(normalizeUrl(href));
       if (chapterId.length === 0 || seen[chapterId]) {
         continue;
       }
@@ -1258,7 +1304,7 @@
         number: chapterNumber,
         isLocked: isLockedChapterEntryHtml(block),
         coinCost: extractLockedChapterCoinCost(block),
-        date: parseDate(match[2])
+        date: parseDate(dateLabel)
       });
     }
 
@@ -1273,19 +1319,20 @@
 
     while ((match = imgRegex.exec(String(html || ""))) !== null) {
       var tag = match[0];
-      var className = String(extractHtmlAttribute(tag, "class") || "").toLowerCase();
-      if (className.indexOf("myimage") === -1) {
+      if (!hasHtmlClass(tag, "myImage")) {
         continue;
       }
 
       var uid = cleanText(extractHtmlAttribute(tag, "uid"));
-      if (uid.length === 0 || seen[uid]) {
+      var order = toPositiveInteger(extractHtmlAttribute(tag, "count"), pages.length);
+      var pageKey = String(order) + "|" + uid;
+      if (uid.length === 0 || seen[pageKey]) {
         continue;
       }
 
-      seen[uid] = true;
+      seen[pageKey] = true;
       pages.push({
-        order: toPositiveInteger(extractHtmlAttribute(tag, "count"), pages.length),
+        order: order,
         url: buildPageImageUrl(uid)
       });
     }
@@ -1335,7 +1382,7 @@
       return 0;
     }
 
-    return toPositiveInteger(extractHtmlAttribute(html, "c"), 0);
+    return toPositiveInteger(extractHtmlAttribute(extractOpeningTag(html), "c"), 0);
   }
 
   function buildChapterPreviewSubtitle(entry) {
@@ -1388,6 +1435,164 @@
   }
 
   // Generic Utilities
+
+  function extractBlocksByClass(html, tagName, className) {
+    var value = String(html || "");
+    var tagRegex = new RegExp("<" + escapeRegex(tagName) + "\\b[^>]*>", "gi");
+    var starts = [];
+    var match;
+
+    while ((match = tagRegex.exec(value)) !== null) {
+      if (hasHtmlClass(match[0], className)) {
+        starts.push(match.index);
+      }
+    }
+
+    return starts.map(function(start, index) {
+      var end = index + 1 < starts.length ? starts[index + 1] : value.length;
+      return value.slice(start, end);
+    });
+  }
+
+  function extractElementHtmlByClass(html, tagName, className) {
+    var value = String(html || "");
+    var openTagRegex = new RegExp("<" + escapeRegex(tagName) + "\\b[^>]*>", "gi");
+    var match;
+
+    while ((match = openTagRegex.exec(value)) !== null) {
+      if (!hasHtmlClass(match[0], className)) {
+        continue;
+      }
+
+      var closingTag = "</" + tagName + ">";
+      var end = value.toLowerCase().indexOf(closingTag.toLowerCase(), openTagRegex.lastIndex);
+      return end >= 0 ? value.slice(match.index, end + closingTag.length) : value.slice(match.index);
+    }
+
+    return "";
+  }
+
+  function extractElementHtmlById(html, tagName, id) {
+    var value = String(html || "");
+    var tagRegex = new RegExp("<\\/?" + escapeRegex(tagName) + "\\b[^>]*>", "gi");
+    var expectedId = cleanText(id);
+    var start = -1;
+    var depth = 0;
+    var match;
+
+    while ((match = tagRegex.exec(value)) !== null) {
+      var tag = match[0];
+      var isClosing = /^<\//.test(tag);
+
+      if (start < 0) {
+        if (!isClosing && cleanText(extractHtmlAttribute(tag, "id")) === expectedId) {
+          start = match.index;
+          depth = 1;
+        }
+        continue;
+      }
+
+      if (isClosing) {
+        depth -= 1;
+        if (depth === 0) {
+          return value.slice(start, tagRegex.lastIndex);
+        }
+      } else if (!/\/>\s*$/.test(tag)) {
+        depth += 1;
+      }
+    }
+
+    return start >= 0 ? value.slice(start) : "";
+  }
+
+  function extractFirstSeriesAnchorTag(html) {
+    var regex = /<a\b[^>]*>/gi;
+    var match;
+
+    while ((match = regex.exec(String(html || ""))) !== null) {
+      if (extractSeriesId(normalizeUrl(extractHtmlAttribute(match[0], "href"))).length > 0) {
+        return match[0];
+      }
+    }
+
+    return "";
+  }
+
+  function hasAnchorPath(html, path) {
+    var expected = normalizeComparableUrl(path);
+    var regex = /<a\b[^>]*>/gi;
+    var match;
+
+    while ((match = regex.exec(String(html || ""))) !== null) {
+      if (normalizeComparableUrl(extractHtmlAttribute(match[0], "href")) === expected) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  function isPathPrefix(value, pathPrefix) {
+    var url = normalizeUrl(value);
+    var expectedPrefix = normalizeUrl(pathPrefix);
+    return url.length > 0 && expectedPrefix.length > 0 && url.indexOf(expectedPrefix) === 0;
+  }
+
+  function normalizeComparableUrl(value) {
+    return normalizeUrl(value).split(/[?#]/)[0].replace(/\/+$/, "");
+  }
+
+  function hasHtmlClass(html, className) {
+    var expected = cleanText(className).toLowerCase();
+    if (expected.length === 0) {
+      return false;
+    }
+
+    return String(extractHtmlAttribute(extractOpeningTag(html), "class") || "").split(/\s+/).some(function(value) {
+      return value.toLowerCase() === expected;
+    });
+  }
+
+  function extractOpeningTag(html) {
+    var match = String(html || "").match(/^\s*<[^>]+>/);
+    return match ? match[0] : "";
+  }
+
+  function containsSeriesLinks(html) {
+    return /<a\b[^>]*\bhref=(['"])\/series\/[^?\/#'"]+\/?\1/i.test(String(html || ""));
+  }
+
+  function extractMetaContent(html, propertyName) {
+    var regex = /<meta\b[^>]*>/gi;
+    var match;
+
+    while ((match = regex.exec(String(html || ""))) !== null) {
+      var tag = match[0];
+      var property = extractHtmlAttribute(tag, "property") || extractHtmlAttribute(tag, "name");
+      if (cleanText(property).toLowerCase() === cleanText(propertyName).toLowerCase()) {
+        return extractHtmlAttribute(tag, "content");
+      }
+    }
+
+    return "";
+  }
+
+  function touchCacheKey(order, key) {
+    var index = order.indexOf(key);
+    if (index >= 0) {
+      order.splice(index, 1);
+    }
+    order.push(key);
+  }
+
+  function storeBoundedCacheEntry(cache, order, key, value, limit) {
+    cache[key] = value;
+    touchCacheKey(order, key);
+
+    while (order.length > limit) {
+      delete cache[order.shift()];
+    }
+  }
 
   function extractHtmlAttribute(html, attributeName) {
     var pattern = new RegExp("\\b" + escapeRegex(attributeName) + "=(['\"])([\\s\\S]*?)\\1", "i");
