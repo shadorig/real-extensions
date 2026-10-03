@@ -13,6 +13,7 @@
 
   var CONTENT_RATING_MATURE = "MATURE";
   var SEARCH_PER_PAGE = 24;
+  var HOME_LATEST_PER_PAGE = 24;
 
   var SECTION_ID_FEATURED = "featured";
   var SECTION_ID_TRENDING = "trending";
@@ -43,15 +44,21 @@
     { id: "manhwa", label: "Manhwa" }
   ];
   var GENRE_LABEL_OVERRIDES = {
+    "adultd": "Adult",
     "gl": "GL",
+    "joseiv": "Josei",
+    "mater": "Mature",
+    "maturemature": "Mature",
+    "romace": "Romance",
     "slice of life": "Slice of Life",
+    "sumt": "Smut",
     "yuri gl": "Yuri GL"
   };
 
   // Source Info
 
   var ErisScansInfo = {
-    version: "1.0.0",
+    version: "1.1.0",
     name: "ErisScans",
     description: "Extension that pulls series from " + DOMAIN,
     author: "real",
@@ -96,6 +103,8 @@
     this.cachedSeriesPageRequests = {};
     this.cachedSeriesIndexHtml = null;
     this.cachedSeriesIndexHtmlRequest = null;
+    this.cachedLatestPosterItems = null;
+    this.cachedLatestPosterItemsRequest = null;
   }
 
   // Paperback Interface Methods
@@ -117,11 +126,16 @@
   };
 
   ErisScans.prototype.getHomePageSections = async function(sectionCallback) {
-    var html = await this.fetchText(DOMAIN + "/");
+    var results = await Promise.all([
+      this.fetchText(DOMAIN + "/"),
+      this.getLatestSectionItems(1)
+    ]);
+    var html = results[0];
+    var latestResults = results[1];
     var sections = [
       createHomeSection(
         SECTION_ID_FEATURED,
-        "Featured",
+        "Spotlight",
         "featured",
         parseFeaturedHomeItems(html),
         false
@@ -144,8 +158,8 @@
         SECTION_ID_LATEST,
         "Latest Updates",
         "singleRowNormal",
-        parseLatestPosterItems(extractHomeSectionHtml(html, "Latest Updates")),
-        false
+        latestResults.results,
+        latestResults.metadata !== void 0
       ),
       createHomeSection(
         SECTION_ID_RECENT,
@@ -168,6 +182,16 @@
     }).forEach(function(section) {
       sectionCallback(section);
     });
+  };
+
+  ErisScans.prototype.getViewMoreItems = async function(homepageSectionId, metadata) {
+    if (homepageSectionId !== SECTION_ID_LATEST) {
+      return App.createPagedResults({
+        results: []
+      });
+    }
+
+    return this.getLatestSectionItems(toPositiveInteger(metadata && metadata.page, 1));
   };
 
   ErisScans.prototype.getCloudflareBypassRequestAsync = async function() {
@@ -228,7 +252,7 @@
         status: mapStatus(seriesDetails.statusId),
         rating: 0,
         tags: buildDetailTagSections(seriesDetails),
-        hentai: false
+        hentai: hasHentaiGenre(seriesDetails)
       })
     });
   };
@@ -240,7 +264,7 @@
     }).map(function(entry) {
       var chapter = {
         id: entry.id,
-        name: buildChapterListName(entry.label, entry.number, entry.isLocked),
+        name: buildChapterListName(entry.label, entry.number, entry.isLocked, entry.coinCost),
         chapNum: entry.number,
         langCode: "en"
       };
@@ -310,6 +334,35 @@
     }.bind(this));
 
     return this.cachedBrowseSeriesRequest;
+  };
+
+  ErisScans.prototype.getLatestSectionItems = async function(page) {
+    return createPagedPartialSeriesResults(
+      await this.fetchAllLatestPosterItems(),
+      toPositiveInteger(page, 1),
+      HOME_LATEST_PER_PAGE
+    );
+  };
+
+  ErisScans.prototype.fetchAllLatestPosterItems = async function() {
+    if (Array.isArray(this.cachedLatestPosterItems)) {
+      return this.cachedLatestPosterItems;
+    }
+
+    if (this.cachedLatestPosterItemsRequest) {
+      return this.cachedLatestPosterItemsRequest;
+    }
+
+    this.cachedLatestPosterItemsRequest = this.fetchText(DOMAIN + "/latest/").then(function(html) {
+      this.cachedLatestPosterItems = parseLatestPosterItems(extractHomeSectionHtml(html, "Latest Updates"));
+      this.cachedLatestPosterItemsRequest = null;
+      return this.cachedLatestPosterItems;
+    }.bind(this)).catch(function(error) {
+      this.cachedLatestPosterItemsRequest = null;
+      throw error;
+    }.bind(this));
+
+    return this.cachedLatestPosterItemsRequest;
   };
 
   ErisScans.prototype.fetchFilterData = async function() {
@@ -526,6 +579,18 @@
     });
   }
 
+  function createPagedPartialSeriesResults(items, page, perPage) {
+    var resolvedPage = toPositiveInteger(page, 1);
+    var normalizedItems = Array.isArray(items) ? items : [];
+    var start = Math.max(0, (resolvedPage - 1) * perPage);
+    var end = start + perPage;
+
+    return App.createPagedResults({
+      results: normalizedItems.slice(start, end),
+      metadata: end < normalizedItems.length ? { page: resolvedPage + 1 } : void 0
+    });
+  }
+
   function extractSeriesId(url) {
     var match = String(url || "").match(/\/series\/([^/?#]+)\/?/i);
     return match ? match[1] : "";
@@ -535,6 +600,7 @@
     var parts = [];
     var typeLabel = cleanText(series && series.typeLabel || "");
     var statusLabel = getVisibleBrowseStatusLabel(series && series.statusId, series && series.statusLabel);
+    var genreLabel = buildBrowseGenreLabel(series && series.genres, 2);
 
     if (typeLabel.length > 0) {
       parts.push(typeLabel);
@@ -542,8 +608,30 @@
     if (statusLabel.length > 0) {
       parts.push(statusLabel);
     }
+    if (genreLabel.length > 0) {
+      parts.push(genreLabel);
+    }
 
     return parts.join(" · ");
+  }
+
+  function buildBrowseGenreLabel(genres, maxGenres) {
+    var limit = toPositiveInteger(maxGenres, 2);
+    var labels = [];
+    var seen = {};
+
+    (Array.isArray(genres) ? genres : []).forEach(function(genre) {
+      var label = cleanText(genre && genre.label);
+      var key = label.toLowerCase();
+      if (label.length === 0 || seen[key] || labels.length >= limit) {
+        return;
+      }
+
+      seen[key] = true;
+      labels.push(label);
+    });
+
+    return labels.join(", ");
   }
 
   function getVisibleBrowseStatusLabel(statusId, statusLabel) {
@@ -575,21 +663,27 @@
     var items = [];
     var seen = {};
     var sectionHtml = sliceBetween(html, /<section class="splide series-splide/i, /<\/section>/i);
-    var regex = /<a[^>]*href="(\/series\/[^"]+\/?)"[^>]*title="([^"]*)"[^>]*class="[^"]*splide__slide[^"]*"[\s\S]*?background-image:\s*url\(([^)]+)\)/gi;
+    var anchorRegex = /<a\b[^>]*class="[^"]*splide__slide[^"]*"[^>]*>[\s\S]*?<\/a>/gi;
     var match;
 
-    while ((match = regex.exec(sectionHtml)) !== null) {
-      var url = normalizeUrl(match[1]);
+    while ((match = anchorRegex.exec(sectionHtml)) !== null) {
+      var block = match[0];
+      var url = normalizeUrl(extractHtmlAttribute(block, "href"));
       var seriesId = extractSeriesId(url);
       if (seriesId.length === 0 || seen[seriesId]) {
+        continue;
+      }
+
+      var title = cleanText(extractHtmlAttribute(block, "title")) || cleanText(extractHtmlAttribute(block, "alt"));
+      if (title.length === 0) {
         continue;
       }
 
       seen[seriesId] = true;
       items.push(createPartialSeries({
         id: seriesId,
-        title: cleanText(match[2]),
-        image: normalizeCssUrl(match[3])
+        title: title,
+        image: normalizeCssUrl(extractMatch(block, /background-image:\s*url\(([^)]+)\)/i, 1))
       }));
     }
 
@@ -642,7 +736,15 @@
       return "";
     }
 
-    return buildChapterPreviewSubtitle(entries[0]);
+    var parts = [buildChapterPreviewSubtitle(entries[0])];
+    var dateLabel = cleanText(entries[0].dateLabel || "");
+    if (dateLabel.length > 0) {
+      parts.push(dateLabel);
+    }
+
+    return parts.filter(function(part) {
+      return cleanText(part).length > 0;
+    }).join(" · ");
   }
 
   function extractLatestPosterChapterEntries(block) {
@@ -660,7 +762,9 @@
 
       entries.push({
         label: label,
-        isLocked: isLockedChapterEntryHtml(entryHtml)
+        isLocked: isLockedChapterEntryHtml(entryHtml),
+        coinCost: extractLockedChapterCoinCost(entryHtml),
+        dateLabel: cleanText(extractHtmlAttribute(entryHtml, "d"))
       });
     }
 
@@ -902,8 +1006,8 @@
     var match;
 
     while ((match = itemRegex.exec(block)) !== null) {
-      var id = normalizeOptionId(match[1]);
-      var label = normalizeGenreLabel(match[2]);
+      var label = filterType === "genre" ? normalizeGenreLabel(match[2]) : formatOptionLabel(match[2]);
+      var id = filterType === "genre" ? normalizeOptionId(label) : normalizeOptionId(match[1]);
       if (id.length === 0 || label.length === 0 || seen[id]) {
         continue;
       }
@@ -936,6 +1040,8 @@
       description: extractSeriesDescription(html),
       author: extractInfoChip(metaHtml, "Author"),
       artist: extractInfoChip(metaHtml, "Artist"),
+      addedAt: extractStructuredDateLabel(html, "datePublished"),
+      updatedAt: extractInfoChip(metaHtml, "Last Updated At"),
       statusId: normalizeOptionId(status),
       statusLabel: formatOptionLabel(status),
       typeId: normalizeOptionId(type),
@@ -1045,6 +1151,22 @@
       }));
     }
 
+    var addedAt = cleanText(details && details.addedAt || "");
+    if (addedAt.length > 0) {
+      metadataTags.push(App.createTag({
+        id: "added",
+        label: "Added: " + addedAt
+      }));
+    }
+
+    var updatedAt = cleanText(details && details.updatedAt || "");
+    if (updatedAt.length > 0) {
+      metadataTags.push(App.createTag({
+        id: "updated",
+        label: "Updated: " + updatedAt
+      }));
+    }
+
     if (genreTags.length > 0) {
       sections.push(App.createTagSection({
         id: "genres",
@@ -1062,6 +1184,12 @@
     }
 
     return sections;
+  }
+
+  function hasHentaiGenre(details) {
+    return (Array.isArray(details && details.genres) ? details.genres : []).some(function(genre) {
+      return cleanText(genre && genre.id).toLowerCase() === "hentai";
+    });
   }
 
   function buildTitles(primaryTitle, alternativeTitles) {
@@ -1129,6 +1257,7 @@
         label: label,
         number: chapterNumber,
         isLocked: isLockedChapterEntryHtml(block),
+        coinCost: extractLockedChapterCoinCost(block),
         date: parseDate(match[2])
       });
     }
@@ -1201,15 +1330,23 @@
     return /This is an early access chapter/i.test(value) || /purchase the chapter using cards balance/i.test(value);
   }
 
+  function extractLockedChapterCoinCost(html) {
+    if (!isLockedChapterEntryHtml(html)) {
+      return 0;
+    }
+
+    return toPositiveInteger(extractHtmlAttribute(html, "c"), 0);
+  }
+
   function buildChapterPreviewSubtitle(entry) {
     return entry && entry.isLocked ?
-      buildLockedChapterLabel(entry.label, extractChapterNumber(entry.label)) :
+      buildLockedChapterLabel(entry.label, extractChapterNumber(entry.label), entry.coinCost) :
       buildReadableChapterLabel(entry && entry.label, extractChapterNumber(entry && entry.label));
   }
 
-  function buildChapterListName(chapterLabel, chapterNumber, isLockedChapter) {
+  function buildChapterListName(chapterLabel, chapterNumber, isLockedChapter, coinCost) {
     return isLockedChapter ?
-      buildLockedChapterLabel(chapterLabel, chapterNumber) :
+      buildLockedChapterLabel(chapterLabel, chapterNumber, coinCost) :
       buildReadableChapterLabel(chapterLabel, chapterNumber);
   }
 
@@ -1218,8 +1355,10 @@
     return normalizedLabel.length > 0 ? normalizedLabel : buildDefaultChapterName(chapterNumber);
   }
 
-  function buildLockedChapterLabel(chapterLabel, chapterNumber) {
-    return LOCKED_CHAPTER_LABEL_PREFIX + buildReadableChapterLabel(chapterLabel, chapterNumber);
+  function buildLockedChapterLabel(chapterLabel, chapterNumber, coinCost) {
+    var label = LOCKED_CHAPTER_LABEL_PREFIX + buildReadableChapterLabel(chapterLabel, chapterNumber);
+    var cost = toPositiveInteger(coinCost, 0);
+    return cost > 0 ? label + " · " + cost + (cost === 1 ? " coin" : " coins") : label;
   }
 
   function normalizeChapterLabel(value) {
@@ -1365,6 +1504,18 @@
     }
 
     return parseRelativeDate(clean);
+  }
+
+  function extractStructuredDateLabel(html, propertyName) {
+    var pattern = new RegExp('"' + escapeRegex(propertyName) + '"\\s*:\\s*"([^"]+)"', "i");
+    var value = extractMatch(html, pattern, 1);
+    var date = parseDate(value);
+    return date instanceof Date && !isNaN(date.getTime()) ? formatDateLabel(date) : "";
+  }
+
+  function formatDateLabel(date) {
+    var months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    return months[date.getUTCMonth()] + " " + date.getUTCDate() + ", " + date.getUTCFullYear();
   }
 
   function parseRelativeDate(value) {
