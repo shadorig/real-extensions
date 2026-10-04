@@ -27,7 +27,7 @@ The current normal sources differ heavily in implementation style:
 - ErisScans is HTML-first. Its core work is homepage section extraction, series index parsing, detail/chapter scraping, and local filter normalization over scraped series data.
 - QiScans is API-first. Its core work is JSON fetching, payload validation, pagination, and payload-to-Paperback mapping.
 - ElfToon is API-first for catalogue, search, details, and chapter page data, with a Next.js RSC fallback for reader chapter IDs and page payloads.
-- HiveToon is hybrid. It uses API endpoints for browse/chapter data, but also needs site-specific page-payload extraction for canonical series data.
+- HiveToon is hybrid. It uses API endpoints for browse, detail, filter, and chapter data, while its homepage still needs source-specific parsing for the current custom hero and server-rendered rows plus legacy framework fallbacks.
 - GenzToon is HTML-first. Its core work is homepage block extraction, shared series-index parsing, source-local genre normalization, and detail/chapter scraping with locked-chapter handling.
 - DivaScans is API-first for details, archive/search, and chapter data, but also reads server-rendered homepage payloads for multiple rows and needs source-specific genre normalization.
 - MadaraScans is HTML-first with WordPress AJAX pagination. Its core work is page fetching, browse URL building, AJAX row loading, card/detail parsing, and locked chapter/page detection from HTML.

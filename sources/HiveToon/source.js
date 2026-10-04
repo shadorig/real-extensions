@@ -10,23 +10,54 @@
   var SOURCE_INTENTS_CLOUDFLARE_BYPASS_REQUIRED = 16;
   var SOURCE_INTENTS_SETTINGS_UI = 32;
   var CONTENT_RATING_MATURE = "MATURE";
-  var BROWSE_PER_PAGE = 300;
   var SEARCH_PER_PAGE = 24;
   var HOME_FEATURED_PER_PAGE = 12;
   var HOME_FEATURED_GENRE_LIMIT = 5;
   var HOME_POPULAR_PER_PAGE = 12;
   var HOME_LATEST_PER_PAGE = 24;
-  var CHAPTERS_PER_REQUEST = 500;
+  var FILTER_DATA_CACHE_MS = 5 * 60 * 1000;
+  var SERIES_PAYLOAD_CACHE_MS = 60 * 1000;
+  var SERIES_PAYLOAD_CACHE_LIMIT = 16;
   var ARCHIVE_DEFAULT_SERIES_TYPES = "MANGA,MANHWA,MANHUA";
   var SECTION_ID_FEATURED = "featured";
   var SECTION_ID_POPULAR = "popular_today";
   var SECTION_ID_LATEST = "latest_releases";
+  var STATE_LATEST_RELEASES_VIEW = "latest_releases_view";
+  var LATEST_RELEASES_VIEW_LATEST = "latest";
+  var LATEST_RELEASES_VIEW_NEW = "new";
   var SEARCH_FIELD_MIN_CHAPTERS = "min_chapters";
+  var SEARCH_FIELD_MAX_CHAPTERS = "max_chapters";
+  var SEARCH_FIELD_CREATED_AFTER = "created_after";
+  var SEARCH_FIELD_CREATED_BEFORE = "created_before";
   var SEARCH_TAG_PREFIX_GENRE = "genre:";
   var SEARCH_TAG_PREFIX_STATUS = "status:";
   var SEARCH_TAG_PREFIX_TYPE = "type:";
+  var SEARCH_TAG_PREFIX_SALE = "sale:";
   var SEARCH_TAG_PREFIX_SORT = "sort:";
   var SEARCH_TAG_PREFIX_ORDER = "order:";
+  var LATEST_RELEASES_VIEW_OPTIONS = [
+    { id: LATEST_RELEASES_VIEW_LATEST, label: "Latest" },
+    { id: LATEST_RELEASES_VIEW_NEW, label: "New" }
+  ];
+  var SEARCH_STATUS_OPTIONS = [
+    { id: "ONGOING", label: "Ongoing" },
+    { id: "COMPLETED", label: "Completed" },
+    { id: "CANCELLED", label: "Cancelled" },
+    { id: "DROPPED", label: "Dropped" },
+    { id: "MASS_RELEASED", label: "Mass Released" },
+    { id: "COMING_SOON", label: "Coming Soon" },
+    { id: "ONE_SHOT", label: "One Shot" },
+    { id: "HIATUS", label: "Hiatus" }
+  ];
+  var SEARCH_TYPE_OPTIONS = [
+    { id: "MANGA", label: "Manga" },
+    { id: "MANHWA", label: "Manhwa" },
+    { id: "MANHUA", label: "Manhua" }
+  ];
+  var SEARCH_SALE_OPTIONS = [
+    { id: "active", label: "On Sale" },
+    { id: "inactive", label: "Full Price" }
+  ];
   var ARCHIVE_SORT_OPTIONS = [
     { id: "latest_chapters", label: "Latest Chapters", orderBy: "lastChapterAddedAt", defaultDirection: "desc" },
     { id: "popular", label: "Most Popular", orderBy: "totalViews", defaultDirection: "desc" },
@@ -53,7 +84,7 @@
   // Source Info
 
   var HiveToonInfo = {
-    version: "1.0.1",
+    version: "1.1.0",
     name: "HiveToon",
     description: "Extension that pulls series from " + DOMAIN,
     author: "real",
@@ -86,10 +117,10 @@
     });
 
     this.stateManager = App.createSourceStateManager();
-    this.cachedBrowseSeries = null;
     this.cachedFilterData = null;
     this.cachedSeriesPayloads = {};
-    this.cachedSeriesChapters = {};
+    this.cachedSeriesPayloadOrder = [];
+    this.cachedSeriesPayloadRequests = {};
   }
 
   // Paperback Interface Methods
@@ -114,12 +145,27 @@
   };
 
   HiveToon.prototype.getHomePageSections = async function(sectionCallback) {
-    var results = await Promise.all([
+    var latestReleasesView = await getLatestReleasesView(this.stateManager);
+    var results = await Promise.allSettled([
       this.fetchText(DOMAIN),
-      this.getLatestSectionItems(1)
+      this.getLatestSectionItems(1, latestReleasesView)
     ]);
-    var homeData = extractHomePageData(results[0]);
-    var latestResults = results[1];
+    var homeData = {
+      featured: [],
+      popularToday: []
+    };
+    var latestResults = App.createPagedResults({ results: [] });
+    var latestError;
+
+    if (results[0] && results[0].status === "fulfilled") {
+      homeData = extractHomePageData(results[0].value);
+    }
+
+    if (results[1] && results[1].status === "fulfilled") {
+      latestResults = results[1].value;
+    } else {
+      latestError = results[1] && results[1].reason;
+    }
     var sections = [
       createHomeSection(
         SECTION_ID_FEATURED,
@@ -130,7 +176,7 @@
       ),
       createHomeSection(
         SECTION_ID_POPULAR,
-        "Popular Today",
+        "Most Popular",
         "singleRowLarge",
         homeData.popularToday.slice(0, HOME_POPULAR_PER_PAGE),
         false
@@ -144,11 +190,17 @@
       )
     ];
 
-    sections.filter(function(section) {
+    var visibleSections = sections.filter(function(section) {
       return Array.isArray(section.items) && section.items.length > 0;
-    }).forEach(function(section) {
+    });
+
+    visibleSections.forEach(function(section) {
       sectionCallback(section);
     });
+
+    if (visibleSections.length === 0) {
+      throw latestError || (results[0] && results[0].reason) || new Error("Unable to load HiveToon homepage sections.");
+    }
   };
 
   HiveToon.prototype.getViewMoreItems = async function(homepageSectionId, metadata) {
@@ -158,7 +210,10 @@
       });
     }
 
-    return this.getLatestSectionItems(toPositiveInteger(metadata && metadata.page, 1));
+    return this.getLatestSectionItems(
+      toPositiveInteger(metadata && metadata.page, 1),
+      await getLatestReleasesView(this.stateManager)
+    );
   };
 
   HiveToon.prototype.getCloudflareBypassRequestAsync = async function() {
@@ -187,6 +242,25 @@
                 await stateManager.store(STATE_SHOW_LOCKED_CHAPTERS, newValue === true);
               }
             })
+          }),
+          App.createDUISelect({
+            id: STATE_LATEST_RELEASES_VIEW,
+            label: "Latest Releases View",
+            options: LATEST_RELEASES_VIEW_OPTIONS.map(function(option) {
+              return option.id;
+            }),
+            allowsMultiselect: false,
+            labelResolver: async function(value) {
+              return getLatestReleasesViewLabel(value);
+            },
+            value: App.createDUIBinding({
+              get: async function() {
+                return getLatestReleasesViewSelection(await getLatestReleasesView(stateManager));
+              },
+              set: async function(newValue) {
+                await stateManager.store(STATE_LATEST_RELEASES_VIEW, normalizeLatestReleasesView(newValue));
+              }
+            })
           })
         ];
       }
@@ -194,19 +268,22 @@
   };
 
   HiveToon.prototype.supportsTagExclusion = async function() {
-    return false;
+    // Paperback exposes exclusion source-wide. HiveToon only provides a real
+    // excludedGenreIds backend filter, so non-genre exclusions are ignored.
+    return true;
   };
 
   HiveToon.prototype.getSearchTags = async function() {
-    if (!this.cachedFilterData) {
-      this.cachedFilterData = await this.fetchFilterData();
-    }
-
-    return buildSearchTagSections(this.cachedFilterData);
+    return buildSearchTagSections(await this.fetchFilterData());
   };
 
   HiveToon.prototype.getSearchFields = async function() {
-    return [createMinimumChaptersSearchField()];
+    return [
+      createSearchField(SEARCH_FIELD_MIN_CHAPTERS, "Minimum Chapters", "e.g. 10"),
+      createSearchField(SEARCH_FIELD_MAX_CHAPTERS, "Maximum Chapters", "e.g. 100"),
+      createSearchField(SEARCH_FIELD_CREATED_AFTER, "Created After", "YYYY-MM-DD"),
+      createSearchField(SEARCH_FIELD_CREATED_BEFORE, "Created Before", "YYYY-MM-DD")
+    ];
   };
 
   HiveToon.prototype.getMangaDetails = async function(seriesId) {
@@ -243,7 +320,7 @@
         id: String(chapter.slug || ""),
         name: buildChapterListName(chapter, chapterNumber),
         chapNum: chapterNumber,
-        time: parseDate(chapter.updatedAt || chapter.createdAt),
+        time: getChapterDisplayDate(chapter),
         langCode: "en"
       });
     });
@@ -296,18 +373,14 @@
       return this.getArchiveSearchResults(title, filters, page);
     }
 
-    if (title.length > 0) {
-      return this.getTitleSearchResults(title, page);
-    }
-
-    return createPagedSeriesResults(await this.fetchAllBrowseSeries(), page, SEARCH_PER_PAGE);
+    return this.getTitleSearchResults(title, page);
   };
 
   // Source-Specific Fetch Helpers
 
-  HiveToon.prototype.getLatestSectionItems = async function(page) {
+  HiveToon.prototype.getLatestSectionItems = async function(page, view) {
     var resolvedPage = toPositiveInteger(page, 1);
-    var latestPage = await this.fetchSectionPage("", resolvedPage, HOME_LATEST_PER_PAGE);
+    var latestPage = await this.fetchSectionPage(getLatestReleasesViewTag(view), resolvedPage, HOME_LATEST_PER_PAGE);
     return App.createPagedResults({
       results: mapHomeItems(latestPage.series),
       metadata: getNextPageMetadataFromCount(latestPage.totalCount, resolvedPage, HOME_LATEST_PER_PAGE, latestPage.pageCount)
@@ -315,46 +388,21 @@
   };
 
   HiveToon.prototype.fetchFilterData = async function() {
-    var allSeries = await this.fetchAllBrowseSeries();
-    return {
-      genres: extractGenreOptions(allSeries),
-      statuses: extractNamedFilterOptions(allSeries, "seriesStatus"),
-      types: extractNamedFilterOptions(allSeries, "seriesType")
+    if (this.cachedFilterData && Date.now() < this.cachedFilterData.expiresAt) {
+      return this.cachedFilterData.value;
+    }
+
+    var genres = await this.fetchJson(buildApiUrl("/genres"));
+    var filterData = {
+      genres: extractGenreOptions(genres),
+      statuses: SEARCH_STATUS_OPTIONS,
+      types: SEARCH_TYPE_OPTIONS
     };
-  };
-
-  HiveToon.prototype.fetchAllBrowseSeries = async function() {
-    if (Array.isArray(this.cachedBrowseSeries)) {
-      return this.cachedBrowseSeries;
-    }
-
-    var firstPage = await this.fetchSectionPage("", 1, BROWSE_PER_PAGE);
-    var pages = [firstPage.series];
-    var totalCount = toPositiveInteger(firstPage.totalCount, 0);
-
-    if (totalCount > 0) {
-      var totalPages = Math.max(1, Math.ceil(totalCount / BROWSE_PER_PAGE));
-      var pendingPages = [];
-      for (var page = 2; page <= totalPages; page += 1) {
-        pendingPages.push(this.fetchSectionPage("", page, BROWSE_PER_PAGE));
-      }
-
-      (await Promise.all(pendingPages)).forEach(function(resultsPage) {
-        pages.push(resultsPage.series);
-      });
-    } else if (firstPage.pageCount >= BROWSE_PER_PAGE) {
-      var nextPage = 2;
-      var nextResultsPage;
-
-      do {
-        nextResultsPage = await this.fetchSectionPage("", nextPage, BROWSE_PER_PAGE);
-        pages.push(nextResultsPage.series);
-        nextPage += 1;
-      } while (nextResultsPage.pageCount >= BROWSE_PER_PAGE);
-    }
-
-    this.cachedBrowseSeries = normalizeSeriesPayloads([].concat.apply([], pages));
-    return this.cachedBrowseSeries;
+    this.cachedFilterData = {
+      value: filterData,
+      expiresAt: Date.now() + FILTER_DATA_CACHE_MS
+    };
+    return filterData;
   };
 
   HiveToon.prototype.fetchSectionPage = async function(tag, page, perPage) {
@@ -389,7 +437,7 @@
       results: series.map(function(item) {
         return createPartialSeries(item, buildHomeSubtitle(item));
       }),
-      metadata: pagePosts.length >= SEARCH_PER_PAGE ? { page: resolvedPage + 1 } : void 0
+      metadata: getNextPageMetadataFromCount(response && response.totalCount, resolvedPage, SEARCH_PER_PAGE, pagePosts.length)
     });
   };
 
@@ -409,19 +457,44 @@
 
   HiveToon.prototype.fetchSeriesPayload = async function(seriesId) {
     var cacheKey = cleanText(seriesId || "");
-    if (isObject(this.cachedSeriesPayloads[cacheKey])) {
-      return this.cachedSeriesPayloads[cacheKey];
+    if (cacheKey.length === 0) {
+      throw new Error("HiveToon requires a series id.");
+    }
+    var cached = this.cachedSeriesPayloads[cacheKey];
+    if (cached && Date.now() < cached.expiresAt && isObject(cached.value)) {
+      touchCacheKey(this.cachedSeriesPayloadOrder, cacheKey);
+      return cached.value;
     }
 
-    var payload = await this.fetchJson(buildApiUrl("/post", {
-      postSlug: cacheKey
-    }));
-    var seriesPayload = isObject(payload && payload.post) ? payload.post : null;
-    if (!isSeriesPayload(seriesPayload)) {
-      throw new Error("Unable to decode the HiveToon series payload for " + seriesId + ".");
+    if (!this.cachedSeriesPayloadRequests[cacheKey]) {
+      this.cachedSeriesPayloadRequests[cacheKey] = (async function() {
+        var payload = await this.fetchJson(buildApiUrl("/post", {
+          postSlug: cacheKey
+        }));
+        var seriesPayload = isObject(payload && payload.post) ? payload.post : null;
+        if (!isSeriesPayload(seriesPayload)) {
+          throw new Error("Unable to decode the HiveToon series payload for " + seriesId + ".");
+        }
+
+        storeBoundedCacheEntry(
+          this.cachedSeriesPayloads,
+          this.cachedSeriesPayloadOrder,
+          cacheKey,
+          { value: seriesPayload, expiresAt: Date.now() + SERIES_PAYLOAD_CACHE_MS },
+          SERIES_PAYLOAD_CACHE_LIMIT
+        );
+        return seriesPayload;
+      }.bind(this))();
     }
-    this.cachedSeriesPayloads[cacheKey] = seriesPayload;
-    return this.cachedSeriesPayloads[cacheKey];
+
+    var request = this.cachedSeriesPayloadRequests[cacheKey];
+    try {
+      return await request;
+    } finally {
+      if (this.cachedSeriesPayloadRequests[cacheKey] === request) {
+        delete this.cachedSeriesPayloadRequests[cacheKey];
+      }
+    }
   };
 
   HiveToon.prototype.fetchSeriesChapters = async function(series) {
@@ -432,27 +505,18 @@
       throw new Error("HiveToon did not expose a valid series record for the chapter list.");
     }
 
-    if (Array.isArray(this.cachedSeriesChapters[seriesId])) {
-      return this.cachedSeriesChapters[seriesId];
+    var payload = await this.fetchJson(buildApiUrl("/chapters", {
+      postId: seriesApiId,
+      skip: 0,
+      take: "all",
+      order: "desc"
+    }));
+    var chapters = payload && payload.post && payload.post.chapters;
+    if (!Array.isArray(chapters)) {
+      throw new Error("HiveToon did not expose a valid chapter payload for " + seriesId + ".");
     }
 
-    var chapters = [];
-    var skip = 0;
-    var pageChapters = [];
-
-    do {
-      pageChapters = normalizeChapterEntries(await this.fetchJson(buildApiUrl("/post/chapters", {
-        postId: seriesApiId,
-        skip: skip,
-        take: CHAPTERS_PER_REQUEST,
-        order: "desc"
-      })));
-      chapters = chapters.concat(pageChapters);
-      skip += pageChapters.length;
-    } while (pageChapters.length === CHAPTERS_PER_REQUEST);
-
-    this.cachedSeriesChapters[seriesId] = chapters;
-    return chapters;
+    return normalizeChapterEntries(chapters);
   };
 
   HiveToon.prototype.fetchJson = async function(url) {
@@ -475,8 +539,109 @@
 
   // Site Parsing Helpers
 
-  // HiveToon's homepage rows render through serialized Astro island props.
-  // Keep the old Next flight helpers as a fallback for older deployed pages.
+  // HiveToon's current homepage mixes a custom featured-series payload with
+  // server-rendered cards. Keep older Astro and Next payload paths as fallbacks
+  // so a frontend rollback does not immediately remove homepage rows.
+  function extractCurrentHeroPosts(html) {
+    var source = String(html || "");
+    var markerMatch = /\b(?:const|let|var)\s+hvtXHeroLibrary\s*=\s*/.exec(source);
+    if (!markerMatch) {
+      return [];
+    }
+
+    var items = extractJsonValueAtIndex(source, markerMatch.index + markerMatch[0].length);
+    if (!Array.isArray(items)) {
+      return [];
+    }
+
+    return items.map(function(item) {
+      var slug = extractSeriesSlug(item && item.seriesUrl);
+      var title = cleanText(item && (item.seriesTitle || item.title || item.name));
+      if (slug.length === 0 || title.length === 0) {
+        return null;
+      }
+
+      return {
+        slug: slug,
+        postTitle: title,
+        featuredImage: cleanText(item.thumbnail || item.mobileImage || item.desktopImage || ""),
+        seriesType: "MANHWA",
+        genres: (Array.isArray(item.genres) ? item.genres : []).map(function(genre) {
+          var name = cleanText(genre);
+          return {
+            id: normalizeSearchText(name).replace(/[^a-z0-9]+/g, "-"),
+            name: name
+          };
+        }).filter(function(genre) {
+          return genre.name.length > 0;
+        })
+      };
+    }).filter(Boolean);
+  }
+
+  function extractCurrentMostPopularPosts(html) {
+    var source = String(html || "");
+    var headingMatch = /<h2\b[^>]*>\s*Most Popular\s*<\/h2>/i.exec(source);
+    if (!headingMatch) {
+      return [];
+    }
+
+    var headingIndex = headingMatch.index;
+    var sectionStart = source.lastIndexOf("<section", headingIndex);
+    var sectionEnd = source.indexOf("</section>", headingIndex);
+    if (sectionStart === -1 || sectionEnd === -1 || sectionEnd <= sectionStart) {
+      return [];
+    }
+
+    var sectionHtml = source.slice(sectionStart, sectionEnd + 10);
+    var linkRegex = /<a\b[^>]*\bhref="\/series\/([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+    var posts = [];
+    var match;
+
+    while ((match = linkRegex.exec(sectionHtml)) !== null) {
+      var slug = extractSeriesSlug("/series/" + decodeAstroPropsJson(match[1]));
+      var imageTagMatch = match[2].match(/<img\b[^>]*>/i);
+      var imageTag = imageTagMatch ? imageTagMatch[0] : "";
+      var title = cleanText(decodeAstroPropsJson(extractHtmlAttribute(imageTag, "alt")));
+      var image = cleanText(decodeAstroPropsJson(extractHtmlAttribute(imageTag, "src")));
+
+      if (slug.length === 0 || title.length === 0) {
+        continue;
+      }
+
+      posts.push({
+        slug: slug,
+        postTitle: title,
+        featuredImage: image
+      });
+    }
+
+    return normalizeSeriesPayloads(posts);
+  }
+
+  function extractHtmlAttribute(tag, attributeName) {
+    var pattern = new RegExp("\\b" + attributeName + "=\\\"([^\\\"]*)\\\"", "i");
+    var match = pattern.exec(String(tag || ""));
+    return match ? match[1] : "";
+  }
+
+  function extractSeriesSlug(value) {
+    var url = cleanText(decodeAstroPropsJson(value || ""));
+    var marker = "/series/";
+    var markerIndex = url.toLowerCase().indexOf(marker);
+    var slug = markerIndex >= 0 ? url.slice(markerIndex + marker.length) : url;
+    slug = slug.split(/[/?#]/)[0];
+    if (slug.length === 0 || slug.indexOf(":") !== -1) {
+      return "";
+    }
+
+    try {
+      return decodeURIComponent(slug);
+    } catch (error) {
+      return slug;
+    }
+  }
+
   function extractAstroPropsObjects(html) {
     var propsObjects = [];
     var propsRegex = /<astro-island\b[^>]*\sprops="([^"]*)"/g;
@@ -569,30 +734,6 @@
     }
   }
 
-  function extractFlightObject(html, marker, label) {
-    var flightChunks = decodeNextFlightChunks(html);
-    for (var chunkIndex = 0; chunkIndex < flightChunks.length; chunkIndex += 1) {
-      var decodedChunk = String(flightChunks[chunkIndex] || "");
-      var markerIndex = decodedChunk.indexOf(marker);
-      if (markerIndex === -1) {
-        continue;
-      }
-
-      var objectText = extractBalancedJsonObject(decodedChunk, markerIndex);
-      if (!objectText) {
-        throw new Error("Unable to isolate the HiveToon " + label + " payload.");
-      }
-
-      try {
-        return JSON.parse(objectText);
-      } catch (error) {
-        throw new Error("Unable to decode the HiveToon " + label + " payload.");
-      }
-    }
-
-    throw new Error("Unable to find the HiveToon " + label + " payload.");
-  }
-
   function decodeNextFlightChunks(html) {
     var chunks = [];
     var scriptRegex = /self\.__next_f\.push\(\[1,("(?:(?:\\.|[^"\\])*)")\]\)<\/script>/g;
@@ -630,53 +771,6 @@
     }
 
     return null;
-  }
-
-  function extractBalancedJsonObject(text, startIndex) {
-    var depth = 0;
-    var inString = false;
-    var escaped = false;
-
-    for (var index = startIndex; index < text.length; index += 1) {
-      var character = text.charAt(index);
-
-      if (inString) {
-        if (escaped) {
-          escaped = false;
-          continue;
-        }
-
-        if (character === "\\") {
-          escaped = true;
-          continue;
-        }
-
-        if (character === "\"") {
-          inString = false;
-        }
-
-        continue;
-      }
-
-      if (character === "\"") {
-        inString = true;
-        continue;
-      }
-
-      if (character === "{") {
-        depth += 1;
-        continue;
-      }
-
-      if (character === "}") {
-        depth -= 1;
-        if (depth === 0) {
-          return text.slice(startIndex, index + 1);
-        }
-      }
-    }
-
-    return "";
   }
 
   function extractJsonValueAtIndex(source, valueIndex) {
@@ -852,29 +946,15 @@
       typeof series.postTitle === "string";
   }
 
-  function createPagedSeriesResults(seriesList, page, perPage) {
-    var normalizedSeries = normalizeSeriesPayloads(seriesList);
-    var start = Math.max(0, (page - 1) * perPage);
-    var end = start + perPage;
-    var pageItems = normalizedSeries.slice(start, end).map(function(series) {
-      return createPartialSeries(series, buildHomeSubtitle(series));
-    });
-
-    return App.createPagedResults({
-      results: pageItems,
-      metadata: end < normalizedSeries.length ? { page: page + 1 } : void 0
-    });
-  }
-
   function getNextPageMetadataFromCount(totalCount, currentPage, perPage, currentCount) {
     var resolvedTotalCount = toPositiveInteger(totalCount, 0);
-    if (resolvedTotalCount > currentPage * perPage) {
-      return {
-        page: currentPage + 1
-      };
+    var resolvedCurrentCount = toPositiveInteger(currentCount, 0);
+    var resolvedPerPage = toPositiveInteger(perPage, 0);
+    if (resolvedPerPage === 0 || resolvedCurrentCount < resolvedPerPage) {
+      return void 0;
     }
 
-    if (resolvedTotalCount === 0 && toPositiveInteger(currentCount, 0) >= perPage) {
+    if (resolvedTotalCount === 0 || resolvedTotalCount > currentPage * resolvedPerPage) {
       return {
         page: currentPage + 1
       };
@@ -886,21 +966,27 @@
   // Homepage Helpers
 
   function extractHomePageData(html) {
+    var currentFeaturedPosts = extractCurrentHeroPosts(html);
+    var currentPopularPosts = extractCurrentMostPopularPosts(html);
     var astroPropsObjects = extractAstroPropsObjects(html);
     var featuredPosts = findAstroPropsArray(astroPropsObjects, "sliderPosts");
     var popularPosts = findAstroPropsArray(astroPropsObjects, "posts");
+    var flightChunks;
 
-    if (featuredPosts.length > 0 || popularPosts.length > 0) {
-      return {
-        featured: mapFeaturedHomeItems(featuredPosts),
-        popularToday: mapHomeItems(popularPosts, false)
-      };
+    if (featuredPosts.length === 0 || popularPosts.length === 0) {
+      flightChunks = decodeNextFlightChunks(html);
     }
 
-    var flightChunks = decodeNextFlightChunks(html);
+    if (featuredPosts.length === 0) {
+      featuredPosts = extractFlightArrayValue(flightChunks || [], "sliderPosts");
+    }
+    if (popularPosts.length === 0) {
+      popularPosts = extractFlightArrayValue(flightChunks || [], "popularPosts");
+    }
+
     return {
-      featured: mapFeaturedHomeItems(extractFlightArrayValue(flightChunks, "sliderPosts")),
-      popularToday: mapHomeItems(extractFlightArrayValue(flightChunks, "popularPosts"), false)
+      featured: mapFeaturedHomeItems(currentFeaturedPosts.length > 0 ? currentFeaturedPosts : featuredPosts),
+      popularToday: mapHomeItems(currentPopularPosts.length > 0 ? currentPopularPosts : popularPosts, false)
     };
   }
 
@@ -1004,6 +1090,17 @@
     }
 
     sections.push(App.createTagSection({
+      id: "availability",
+      label: "Availability",
+      tags: SEARCH_SALE_OPTIONS.map(function(option) {
+        return App.createTag({
+          id: SEARCH_TAG_PREFIX_SALE + option.id,
+          label: option.label
+        });
+      })
+    }));
+
+    sections.push(App.createTagSection({
       id: "sort",
       label: "Sort",
       tags: ARCHIVE_SORT_OPTIONS.map(function(option) {
@@ -1031,14 +1128,21 @@
   function extractSearchFilters(query) {
     var filters = {
       genres: [],
+      excludedGenres: [],
       status: void 0,
       type: void 0,
-      minChapters: extractMinimumChaptersFilterValue(query),
+      saleFilter: void 0,
+      minChapters: extractPositiveIntegerSearchFieldValue(query, SEARCH_FIELD_MIN_CHAPTERS, "Minimum Chapters"),
+      maxChapters: extractPositiveIntegerSearchFieldValue(query, SEARCH_FIELD_MAX_CHAPTERS, "Maximum Chapters"),
+      createdAfter: extractDateSearchFieldValue(query, SEARCH_FIELD_CREATED_AFTER, "Created After"),
+      createdBefore: extractDateSearchFieldValue(query, SEARCH_FIELD_CREATED_BEFORE, "Created Before"),
       sortBy: void 0,
       sortDirection: void 0
     };
     var seenGenres = {};
+    var seenExcludedGenres = {};
     var includedTags = Array.isArray(query && query.includedTags) ? query.includedTags : [];
+    var excludedTags = Array.isArray(query && query.excludedTags) ? query.excludedTags : [];
 
     includedTags.forEach(function(tag) {
       var tagId = String(tag && tag.id || "");
@@ -1052,12 +1156,26 @@
       }
 
       if (tagId.indexOf(SEARCH_TAG_PREFIX_STATUS) === 0 && filters.status === void 0) {
-        filters.status = tagId.slice(SEARCH_TAG_PREFIX_STATUS.length);
+        var status = tagId.slice(SEARCH_TAG_PREFIX_STATUS.length);
+        if (hasFilterOption(SEARCH_STATUS_OPTIONS, status)) {
+          filters.status = status;
+        }
         return;
       }
 
       if (tagId.indexOf(SEARCH_TAG_PREFIX_TYPE) === 0 && filters.type === void 0) {
-        filters.type = tagId.slice(SEARCH_TAG_PREFIX_TYPE.length);
+        var type = tagId.slice(SEARCH_TAG_PREFIX_TYPE.length);
+        if (hasFilterOption(SEARCH_TYPE_OPTIONS, type)) {
+          filters.type = type;
+        }
+        return;
+      }
+
+      if (tagId.indexOf(SEARCH_TAG_PREFIX_SALE) === 0 && filters.saleFilter === void 0) {
+        var saleFilter = tagId.slice(SEARCH_TAG_PREFIX_SALE.length);
+        if (hasFilterOption(SEARCH_SALE_OPTIONS, saleFilter)) {
+          filters.saleFilter = saleFilter;
+        }
         return;
       }
 
@@ -1077,6 +1195,26 @@
       }
     });
 
+    excludedTags.forEach(function(tag) {
+      var tagId = String(tag && tag.id || "");
+      if (tagId.indexOf(SEARCH_TAG_PREFIX_GENRE) !== 0) {
+        return;
+      }
+
+      var genreId = tagId.slice(SEARCH_TAG_PREFIX_GENRE.length);
+      if (genreId.length > 0 && !seenExcludedGenres[genreId]) {
+        seenExcludedGenres[genreId] = true;
+        filters.excludedGenres.push(genreId);
+      }
+    });
+
+    if (filters.minChapters !== void 0 && filters.maxChapters !== void 0 && filters.minChapters > filters.maxChapters) {
+      throw new Error("Minimum Chapters cannot be greater than Maximum Chapters.");
+    }
+    if (filters.createdAfter && filters.createdBefore && filters.createdAfter > filters.createdBefore) {
+      throw new Error("Created After cannot be later than Created Before.");
+    }
+
     return filters;
   }
 
@@ -1086,9 +1224,14 @@
     }
 
     return (Array.isArray(filters.genres) && filters.genres.length > 0) ||
+      (Array.isArray(filters.excludedGenres) && filters.excludedGenres.length > 0) ||
       cleanText(filters.status).length > 0 ||
       cleanText(filters.type).length > 0 ||
+      cleanText(filters.saleFilter).length > 0 ||
       toPositiveInteger(filters.minChapters, 0) > 0 ||
+      toPositiveInteger(filters.maxChapters, 0) > 0 ||
+      cleanText(filters.createdAfter).length > 0 ||
+      cleanText(filters.createdBefore).length > 0 ||
       hasArchiveSort(filters);
   }
 
@@ -1100,6 +1243,7 @@
   function buildArchiveQueryParams(title, filters, page, perPage) {
     var sortOption = getArchiveSortOption(filters && filters.sortBy) || getArchiveSortOption("latest_chapters");
     var minChapters = toPositiveInteger(filters && filters.minChapters, 0);
+    var maxChapters = toPositiveInteger(filters && filters.maxChapters, 0);
     var params = {
       page: toPositiveInteger(page, 1),
       perPage: toPositiveInteger(perPage, SEARCH_PER_PAGE),
@@ -1110,7 +1254,11 @@
     };
     var searchTerm = cleanText(title || "");
     var genreIds = Array.isArray(filters && filters.genres) ? filters.genres : [];
+    var excludedGenreIds = Array.isArray(filters && filters.excludedGenres) ? filters.excludedGenres : [];
     var seriesStatus = cleanText(filters && filters.status);
+    var saleFilter = cleanText(filters && filters.saleFilter);
+    var createdAfter = cleanText(filters && filters.createdAfter);
+    var createdBefore = cleanText(filters && filters.createdBefore);
 
     if (searchTerm.length > 0) {
       params.searchTerm = searchTerm;
@@ -1118,28 +1266,43 @@
     if (genreIds.length > 0) {
       params.genreIds = genreIds.join(",");
     }
+    if (excludedGenreIds.length > 0) {
+      params.excludedGenreIds = excludedGenreIds.join(",");
+    }
     if (seriesStatus.length > 0) {
       params.seriesStatus = seriesStatus;
     }
+    if (saleFilter.length > 0) {
+      params.saleFilter = saleFilter;
+    }
     if (minChapters > 0) {
       params.minChapters = minChapters;
+    }
+    if (maxChapters > 0) {
+      params.maxChapters = maxChapters;
+    }
+    if (createdAfter.length > 0) {
+      params.createdAfter = createdAfter;
+    }
+    if (createdBefore.length > 0) {
+      params.createdBefore = createdBefore;
     }
 
     return params;
   }
 
-  function createMinimumChaptersSearchField() {
+  function createSearchField(id, name, placeholder) {
     var field = {
-      id: SEARCH_FIELD_MIN_CHAPTERS,
-      name: "Minimum Chapters",
-      placeholder: "e.g. 10"
+      id: id,
+      name: name,
+      placeholder: placeholder
     };
     return typeof App !== "undefined" && App && typeof App.createSearchField === "function" ? App.createSearchField(field) : field;
   }
 
-  function extractMinimumChaptersFilterValue(query) {
+  function extractSearchFieldValue(query, fieldId) {
     var parameters = isObject(query && query.parameters) ? query.parameters : {};
-    var values = Array.isArray(parameters[SEARCH_FIELD_MIN_CHAPTERS]) ? parameters[SEARCH_FIELD_MIN_CHAPTERS] : [];
+    var values = Array.isArray(parameters[fieldId]) ? parameters[fieldId] : [];
     var rawValue = "";
 
     for (var index = 0; index < values.length; index += 1) {
@@ -1152,16 +1315,41 @@
     if (rawValue.length === 0) {
       return void 0;
     }
+    return rawValue;
+  }
+
+  function extractPositiveIntegerSearchFieldValue(query, fieldId, fieldLabel) {
+    var rawValue = extractSearchFieldValue(query, fieldId);
+    if (rawValue === void 0) {
+      return void 0;
+    }
     if (!/^\d+$/.test(rawValue)) {
-      throw new Error("Minimum Chapters must be a positive whole number.");
+      throw new Error(fieldLabel + " must be a positive whole number.");
     }
 
-    var minChapters = parseInt(rawValue, 10);
-    if (!isFinite(minChapters) || minChapters <= 0) {
-      throw new Error("Minimum Chapters must be a positive whole number.");
+    var value = parseInt(rawValue, 10);
+    if (!isFinite(value) || value <= 0) {
+      throw new Error(fieldLabel + " must be a positive whole number.");
     }
 
-    return minChapters;
+    return value;
+  }
+
+  function extractDateSearchFieldValue(query, fieldId, fieldLabel) {
+    var rawValue = extractSearchFieldValue(query, fieldId);
+    if (rawValue === void 0) {
+      return void 0;
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(rawValue)) {
+      throw new Error(fieldLabel + " must use YYYY-MM-DD format.");
+    }
+
+    var parsed = new Date(rawValue + "T00:00:00.000Z");
+    if (isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== rawValue) {
+      throw new Error(fieldLabel + " must be a valid date in YYYY-MM-DD format.");
+    }
+
+    return rawValue;
   }
 
   function getArchiveSortOption(sortBy) {
@@ -1185,43 +1373,21 @@
     });
   }
 
-  function extractGenreOptions(seriesList) {
+  function extractGenreOptions(genres) {
     var deduped = {};
 
-    normalizeSeriesPayloads(seriesList).forEach(function(series) {
-      (Array.isArray(series.genres) ? series.genres : []).forEach(function(genre) {
-        var id = cleanText(genre && genre.id);
-        var label = cleanText(genre && genre.name);
-        if (id.length === 0 || label.length === 0) {
-          return;
-        }
-        if (!deduped[id]) {
-          deduped[id] = {
-            id: id,
-            label: formatGenreLabel(label)
-          };
-        }
-      });
-    });
-
-    return Object.keys(deduped).map(function(id) {
-      return deduped[id];
-    });
-  }
-
-  function extractNamedFilterOptions(seriesList, fieldName) {
-    var deduped = {};
-
-    normalizeSeriesPayloads(seriesList).forEach(function(series) {
-      var value = cleanText(series && series[fieldName]);
-      if (value.length === 0 || value.toUpperCase() === "NOVEL") {
+    (Array.isArray(genres) ? genres : []).forEach(function(genre) {
+      var id = cleanText(genre && genre.id);
+      var label = cleanText(genre && genre.name);
+      if (id.length === 0 || label.length === 0) {
         return;
       }
-
-      deduped[value] = {
-        id: value,
-        label: formatOptionLabel(value)
-      };
+      if (!deduped[id]) {
+        deduped[id] = {
+          id: id,
+          label: formatGenreLabel(label)
+        };
+      }
     });
 
     return Object.keys(deduped).map(function(id) {
@@ -1242,11 +1408,46 @@
     });
   }
 
+  function hasFilterOption(options, id) {
+    return (Array.isArray(options) ? options : []).some(function(option) {
+      return cleanText(option && option.id) === id;
+    });
+  }
+
   // Detail Helpers
 
   function buildDetailTagSections(series) {
+    var sections = [];
     var deduped = {};
     var genreTags = [];
+    var metadataTags = [];
+    var statusId = cleanText(series && series.seriesStatus).toUpperCase();
+    var statusLabel = formatOptionLabel(statusId);
+    var typeId = cleanText(series && series.seriesType).toUpperCase();
+    var typeLabel = formatOptionLabel(typeId);
+
+    if (statusId.length > 0 && statusLabel.length > 0) {
+      metadataTags.push(App.createTag({
+        id: SEARCH_TAG_PREFIX_STATUS + statusId,
+        label: "Status: " + statusLabel
+      }));
+    }
+
+    if (typeId.length > 0 && typeLabel.length > 0) {
+      metadataTags.push(App.createTag({
+        id: SEARCH_TAG_PREFIX_TYPE + typeId,
+        label: "Type: " + typeLabel
+      }));
+    }
+
+    addDetailMetadataTag(metadataTags, "released", "Released", series && series.releaseDate);
+    addDetailMetadataTag(metadataTags, "studio", "Studio", series && series.studio);
+    addDetailMetadataTag(metadataTags, "chapters", "Chapters", formatCount(series && series._count && series._count.chapters));
+    addDetailMetadataTag(metadataTags, "added", "Added", formatDateMetadata(series && series.createdAt));
+    addDetailMetadataTag(metadataTags, "last-chapter", "Last Chapter", formatDateMetadata(series && series.lastChapterAddedAt));
+    addDetailMetadataTag(metadataTags, "views", "Views", formatCount(series && series.totalViews));
+    addDetailMetadataTag(metadataTags, "bookmarks", "Bookmarks", formatCount(series && series._count && series._count.bookmarks));
+    addDetailMetadataTag(metadataTags, "sale", "Sale", formatSaleMetadata(series));
 
     (Array.isArray(series && series.genres) ? series.genres : []).forEach(function(genre) {
       var id = cleanText(genre && genre.id);
@@ -1262,17 +1463,68 @@
       }));
     });
 
-    if (genreTags.length === 0) {
-      return [];
+    if (metadataTags.length > 0) {
+      sections.push(App.createTagSection({
+        id: "metadata",
+        label: "Metadata",
+        tags: metadataTags
+      }));
     }
 
-    return [
-      App.createTagSection({
+    if (genreTags.length > 0) {
+      sections.push(App.createTagSection({
         id: "genres",
         label: "Genres",
         tags: genreTags
-      })
-    ];
+      }));
+    }
+
+    return sections;
+  }
+
+  function addDetailMetadataTag(tags, id, label, value) {
+    var clean = cleanText(value);
+    if (clean.length === 0) {
+      return;
+    }
+    tags.push(App.createTag({
+      id: id + ":" + normalizeSearchText(clean).replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, ""),
+      label: label + ": " + clean
+    }));
+  }
+
+  function formatCount(value) {
+    if (value === null || value === void 0 || cleanText(value).length === 0) {
+      return "";
+    }
+    var count = toNumber(value, NaN);
+    if (!isFinite(count) || count < 0) {
+      return "";
+    }
+    return String(Math.floor(count));
+  }
+
+  function formatDateMetadata(value) {
+    var raw = cleanText(value);
+    if (raw.length === 0) {
+      return "";
+    }
+    var parsed = new Date(raw);
+    return isNaN(parsed.getTime()) ? raw : parsed.toISOString().slice(0, 10);
+  }
+
+  function formatSaleMetadata(series) {
+    if (!series || series.saleActive !== true) {
+      return "";
+    }
+    var saleEndDate = parseOptionalDate(series.saleEndDate);
+    if (saleEndDate !== null && saleEndDate.getTime() <= Date.now()) {
+      return "";
+    }
+    var percentage = toNumber(series.salePercentage, 0);
+    var label = percentage > 0 ? String(Math.floor(percentage)) + "% off" : "Active";
+    var endDate = formatDateMetadata(series.saleEndDate);
+    return endDate.length > 0 ? label + " until " + endDate : label;
   }
 
   function resolveSeriesImage(series) {
@@ -1352,10 +1604,12 @@
   }
 
   function isDisplayChapter(chapter) {
+    var status = cleanText(chapter && chapter.chapterStatus).toUpperCase();
     return isObject(chapter) &&
       typeof chapter.slug === "string" &&
       chapter.slug.length > 0 &&
-      chapter.number !== void 0;
+      chapter.number !== void 0 &&
+      (status.length === 0 || status === "PUBLIC");
   }
 
   function normalizeChapterEntries(chapters) {
@@ -1389,14 +1643,23 @@
       return CHAPTER_ACCESS_UNKNOWN;
     }
 
-    if (chapter.isAccessible === true || chapter.isLocked === false) {
+    var unlockAt = parseOptionalDate(chapter.unlockAt);
+    var unlockPassed = unlockAt !== null && unlockAt.getTime() <= Date.now() && chapter.isPermanentlyLocked !== true;
+    if (chapter.isAccessible === true ||
+      chapter.chapterPurchased === true ||
+      chapter.isPurchased === true ||
+      chapter.hasPurchased === true ||
+      unlockPassed ||
+      chapter.isLocked === false) {
       return CHAPTER_ACCESS_READABLE;
     }
 
     if (chapter.isAccessible === false ||
       chapter.isLocked === true ||
       chapter.isLockedByCoins === true ||
+      chapter.isShortLinkLocked === true ||
       chapter.isPermanentlyLocked === true ||
+      (unlockAt !== null && unlockAt.getTime() > Date.now()) ||
       toNumber(chapter.finalPrice, toNumber(chapter.price, 0)) > 0) {
       return CHAPTER_ACCESS_LOCKED;
     }
@@ -1439,11 +1702,58 @@
     return stored === true;
   }
 
+  async function getLatestReleasesView(stateManager) {
+    return normalizeLatestReleasesView(await stateManager.retrieve(STATE_LATEST_RELEASES_VIEW));
+  }
+
+  function normalizeLatestReleasesView(value) {
+    var rawValue = Array.isArray(value) ? value[0] : value;
+    return cleanText(rawValue).toLowerCase() === LATEST_RELEASES_VIEW_NEW ? LATEST_RELEASES_VIEW_NEW : LATEST_RELEASES_VIEW_LATEST;
+  }
+
+  function getLatestReleasesViewSelection(value) {
+    return [normalizeLatestReleasesView(value)];
+  }
+
+  function getLatestReleasesViewLabel(value) {
+    var view = normalizeLatestReleasesView(value);
+    for (var index = 0; index < LATEST_RELEASES_VIEW_OPTIONS.length; index += 1) {
+      if (LATEST_RELEASES_VIEW_OPTIONS[index].id === view) {
+        return LATEST_RELEASES_VIEW_OPTIONS[index].label;
+      }
+    }
+    return "Latest";
+  }
+
+  function getLatestReleasesViewTag(value) {
+    return normalizeLatestReleasesView(value) === LATEST_RELEASES_VIEW_NEW ? "new" : "latestUpdate";
+  }
+
+  function getChapterDisplayDate(chapter) {
+    var accessState = getChapterAccessState(chapter);
+    if (accessState === CHAPTER_ACCESS_READABLE && cleanText(chapter && chapter.becameFreeAt).length > 0) {
+      return parseDate(chapter.becameFreeAt);
+    }
+    if (accessState === CHAPTER_ACCESS_LOCKED && cleanText(chapter && chapter.unlockAt).length > 0) {
+      return parseDate(chapter.unlockAt);
+    }
+    return parseDate(chapter && (chapter.updatedAt || chapter.createdAt));
+  }
+
   // Generic Utilities
 
   function parseDate(value) {
     var parsed = new Date(String(value || ""));
     return isNaN(parsed.getTime()) ? new Date(0) : parsed;
+  }
+
+  function parseOptionalDate(value) {
+    var raw = cleanText(value);
+    if (raw.length === 0) {
+      return null;
+    }
+    var parsed = new Date(raw);
+    return isNaN(parsed.getTime()) ? null : parsed;
   }
 
   function encodePathSegment(value) {
@@ -1511,6 +1821,25 @@
 
   function isObject(value) {
     return value !== null && typeof value === "object";
+  }
+
+  function touchCacheKey(order, key) {
+    var index = order.indexOf(key);
+    if (index !== -1) {
+      order.splice(index, 1);
+    }
+    order.push(key);
+  }
+
+  function storeBoundedCacheEntry(cache, order, key, entry, limit) {
+    cache[key] = entry;
+    touchCacheKey(order, key);
+    while (order.length > limit) {
+      var oldest = order.shift();
+      if (oldest !== void 0 && oldest !== key) {
+        delete cache[oldest];
+      }
+    }
   }
 
   // Exports
