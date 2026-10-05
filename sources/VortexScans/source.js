@@ -12,21 +12,28 @@
   var CONTENT_RATING_MATURE = "MATURE";
   var SEARCH_PER_PAGE = 24;
   var HOME_FEATURED_PER_PAGE = 12;
-  var HOME_POPULAR_PER_PAGE = 12;
+  var HOME_POPULAR_PER_PAGE = 20;
   var HOME_LATEST_PER_PAGE = 24;
   var HOME_MOST_POPULAR_PER_PAGE = 12;
+  var FILTER_DATA_CACHE_MS = 5 * 60 * 1000;
+  var SERIES_DETAILS_CACHE_MS = 60 * 1000;
+  var SERIES_DETAILS_CACHE_LIMIT = 16;
   var ARCHIVE_DEFAULT_SERIES_TYPES = "MANGA,MANHWA,MANHUA";
   var SECTION_ID_FEATURED = "featured";
   var SECTION_ID_POPULAR = "popular_today";
   var SECTION_ID_LATEST = "latest_releases";
   var SECTION_ID_MOST_POPULAR = "most_popular";
   var SEARCH_FIELD_MIN_CHAPTERS = "min_chapters";
+  var SEARCH_FIELD_MAX_CHAPTERS = "max_chapters";
+  var SEARCH_FIELD_CREATED_AFTER = "created_after";
+  var SEARCH_FIELD_CREATED_BEFORE = "created_before";
   var SEARCH_TAG_PREFIX_GENRE = "genre:";
   var SEARCH_TAG_PREFIX_STATUS = "status:";
   var SEARCH_TAG_PREFIX_TYPE = "type:";
+  var SEARCH_TAG_PREFIX_SALE = "sale:";
   var SEARCH_TAG_PREFIX_SORT = "sort:";
   var SEARCH_TAG_PREFIX_ORDER = "order:";
-  var LATEST_RELEASES_VIEW_HOT = "hot";
+  var LATEST_RELEASES_VIEW_LATEST = "latest";
   var LATEST_RELEASES_VIEW_NEW = "new";
   var STATE_LATEST_RELEASES_VIEW = "latest_releases_view";
   var STATE_SHOW_LOCKED_CHAPTERS = "show_locked_chapters";
@@ -35,7 +42,7 @@
   var CHAPTER_ACCESS_LOCKED = "locked";
   var CHAPTER_ACCESS_UNKNOWN = "unknown";
   var LATEST_RELEASES_VIEW_OPTIONS = [
-    { id: LATEST_RELEASES_VIEW_HOT, label: "Hot" },
+    { id: LATEST_RELEASES_VIEW_LATEST, label: "Latest" },
     { id: LATEST_RELEASES_VIEW_NEW, label: "New" }
   ];
   var SEARCH_STATUS_OPTIONS = [
@@ -44,6 +51,8 @@
     { id: "CANCELLED", label: "Cancelled" },
     { id: "DROPPED", label: "Dropped" },
     { id: "MASS_RELEASED", label: "Mass Released" },
+    { id: "COMING_SOON", label: "Coming Soon" },
+    { id: "ONE_SHOT", label: "One Shot" },
     { id: "HIATUS", label: "Hiatus" }
   ];
   var SEARCH_TYPE_OPTIONS = [
@@ -51,8 +60,13 @@
     { id: "MANHWA", label: "Manhwa" },
     { id: "MANHUA", label: "Manhua" }
   ];
+  var SEARCH_SALE_OPTIONS = [
+    { id: "on_sale", label: "On Sale" },
+    { id: "not_on_sale", label: "Full Price" }
+  ];
   var ARCHIVE_SORT_OPTIONS = [
     { id: "latest_chapters", label: "Latest Chapters", orderBy: "lastChapterAddedAt", defaultDirection: "desc" },
+    { id: "recently_updated", label: "Recently Updated", orderBy: "updatedAt", defaultDirection: "desc" },
     { id: "popular", label: "Most Popular", orderBy: "totalViews", defaultDirection: "desc" },
     { id: "newest", label: "Newest Added", orderBy: "createdAt", defaultDirection: "desc" },
     { id: "oldest", label: "Oldest First", orderBy: "createdAt", defaultDirection: "asc" },
@@ -72,7 +86,7 @@
   // Source Info
 
   var VortexScansInfo = {
-    version: "1.0.0",
+    version: "1.1.0",
     name: "VortexScans",
     description: "Extension that pulls series from " + DOMAIN,
     author: "real",
@@ -94,7 +108,7 @@
           request.headers = Object.assign({}, request.headers || {}, {
             referer: DOMAIN + "/",
             origin: DOMAIN,
-            accept: "application/json, text/plain, */*",
+            accept: "application/json, text/plain, text/html, */*",
             "user-agent": await this.requestManager.getDefaultUserAgent()
           });
           return request;
@@ -107,7 +121,11 @@
 
     this.stateManager = App.createSourceStateManager();
     this.cachedFilterData = null;
+    this.cachedFilterDataRequest = null;
     this.cachedSeriesDetails = {};
+    this.cachedSeriesDetailOrder = [];
+    this.cachedSeriesDetailRequests = {};
+    this.chapterListRequests = {};
   }
 
   // Paperback Interface Methods
@@ -132,26 +150,39 @@
   };
 
   VortexScans.prototype.getHomePageSections = async function(sectionCallback) {
+    var latestReleasesView = await getLatestReleasesView(this.stateManager);
     var results = await Promise.allSettled([
       this.fetchText(DOMAIN),
-      this.getLatestSectionItems(1)
+      this.fetchPostsPage(1, HOME_LATEST_PER_PAGE, {
+        tag: getLatestReleasesViewTag(latestReleasesView)
+      })
     ]);
     var homeData = {
       featured: [],
+      featuredCandidates: [],
       popularToday: [],
       mostPopular: []
     };
-    var latestResults;
+    var latestResults = App.createPagedResults({ results: [] });
+    var latestPage;
+    var homepageError;
+    var latestError;
 
     if (results[0] && results[0].status === "fulfilled") {
       homeData = extractHomePageData(results[0].value);
+    } else {
+      homepageError = results[0] && results[0].reason;
     }
 
-    if (!results[1] || results[1].status !== "fulfilled") {
-      throw results[1] && results[1].reason ? results[1].reason : new Error("Unable to load the VortexScans latest releases section.");
+    if (results[1] && results[1].status === "fulfilled") {
+      latestPage = results[1].value;
+      latestResults = createLatestPagedResults(latestPage);
+      if (Array.isArray(homeData.featuredCandidates) && homeData.featuredCandidates.length > 0) {
+        homeData.featured = mapFeaturedHomeItems(enrichFeaturedPosts(homeData.featuredCandidates, latestPage.series));
+      }
+    } else {
+      latestError = results[1] && results[1].reason;
     }
-
-    latestResults = results[1].value;
     var sections = [
       createHomeSection(
         SECTION_ID_FEATURED,
@@ -183,11 +214,17 @@
       )
     ];
 
-    sections.filter(function(section) {
+    var visibleSections = sections.filter(function(section) {
       return Array.isArray(section.items) && section.items.length > 0;
-    }).forEach(function(section) {
+    });
+
+    visibleSections.forEach(function(section) {
       sectionCallback(section);
     });
+
+    if (visibleSections.length === 0) {
+      throw latestError || homepageError || new Error("Unable to load VortexScans homepage sections.");
+    }
   };
 
   VortexScans.prototype.getViewMoreItems = async function(homepageSectionId, metadata) {
@@ -252,19 +289,22 @@
   };
 
   VortexScans.prototype.supportsTagExclusion = async function() {
-    return false;
+    // Vortex only exposes exclusion for genres. Paperback enables exclusion
+    // source-wide, so exclusions from the other sections are ignored.
+    return true;
   };
 
   VortexScans.prototype.getSearchTags = async function() {
-    if (!this.cachedFilterData) {
-      this.cachedFilterData = await this.fetchFilterData();
-    }
-
-    return buildSearchTagSections(this.cachedFilterData);
+    return buildSearchTagSections(await this.fetchFilterData());
   };
 
   VortexScans.prototype.getSearchFields = async function() {
-    return [createMinimumChaptersSearchField()];
+    return [
+      createSearchField(SEARCH_FIELD_MIN_CHAPTERS, "Minimum Chapters", "e.g. 10"),
+      createSearchField(SEARCH_FIELD_MAX_CHAPTERS, "Maximum Chapters", "e.g. 100"),
+      createSearchField(SEARCH_FIELD_CREATED_AFTER, "Created After", "YYYY-MM-DD"),
+      createSearchField(SEARCH_FIELD_CREATED_BEFORE, "Created Before", "YYYY-MM-DD")
+    ];
   };
 
   VortexScans.prototype.getMangaDetails = async function(seriesId) {
@@ -289,7 +329,7 @@
   VortexScans.prototype.getChapters = async function(seriesId) {
     var series = await this.fetchSeriesDetails(seriesId);
     var showLockedChapters = await getShowLockedChapters(this.stateManager);
-    var chapters = normalizeChapterEntries(series && series.chapters)
+    var chapters = (await this.fetchSeriesChapters(series))
       .filter(isDisplayChapter)
       .sort(compareChapterEntriesDesc);
 
@@ -301,7 +341,7 @@
         id: String(chapter.slug || ""),
         name: buildChapterListName(chapter, chapterNumber),
         chapNum: chapterNumber,
-        time: parseDate(chapter.updatedAt || chapter.createdAt),
+        time: getChapterDisplayDate(chapter),
         langCode: "en"
       });
     }).filter(function(chapter) {
@@ -352,11 +392,7 @@
     var page = toPositiveInteger(metadata && metadata.page, 1);
     var filters = extractSearchFilters(query);
 
-    if (hasActiveSearchFilters(filters)) {
-      return this.getArchiveSearchResults(title, filters, page);
-    }
-
-    return this.getTitleSearchResults(title, page);
+    return this.getArchiveSearchResults(title, filters, page);
   };
 
   // Source-Specific Fetch Helpers
@@ -367,19 +403,50 @@
       tag: getLatestReleasesViewTag(latestReleasesView)
     });
 
-    return App.createPagedResults({
-      results: mapHomeItems(resultsPage.series),
-      metadata: getNextPageMetadataFromCount(resultsPage.totalCount, resultsPage.page, resultsPage.perPage, resultsPage.pageCount)
-    });
+    return createLatestPagedResults(resultsPage);
   };
 
+  function createLatestPagedResults(resultsPage) {
+    return App.createPagedResults({
+      results: mapHomeItems(resultsPage && resultsPage.series),
+      metadata: getNextPageMetadataFromCount(
+        resultsPage && resultsPage.totalCount,
+        resultsPage && resultsPage.page,
+        resultsPage && resultsPage.perPage,
+        resultsPage && resultsPage.pageCount
+      )
+    });
+  }
+
   VortexScans.prototype.fetchFilterData = async function() {
-    var genres = extractGenreOptions(await this.fetchJson(buildApiUrl("/genres")));
-    return {
-      genres: genres,
-      statuses: SEARCH_STATUS_OPTIONS.slice(),
-      types: SEARCH_TYPE_OPTIONS.slice()
-    };
+    if (this.cachedFilterData && Date.now() < this.cachedFilterData.expiresAt) {
+      return this.cachedFilterData.value;
+    }
+
+    if (!this.cachedFilterDataRequest) {
+      this.cachedFilterDataRequest = (async function() {
+        var genres = extractGenreOptions(await this.fetchJson(buildApiUrl("/genres")));
+        var value = {
+          genres: genres,
+          statuses: SEARCH_STATUS_OPTIONS.slice(),
+          types: SEARCH_TYPE_OPTIONS.slice()
+        };
+        this.cachedFilterData = {
+          value: value,
+          expiresAt: Date.now() + FILTER_DATA_CACHE_MS
+        };
+        return value;
+      }.bind(this))();
+    }
+
+    var request = this.cachedFilterDataRequest;
+    try {
+      return await request;
+    } finally {
+      if (this.cachedFilterDataRequest === request) {
+        this.cachedFilterDataRequest = null;
+      }
+    }
   };
 
   VortexScans.prototype.fetchPostsPage = async function(page, perPage, options) {
@@ -402,17 +469,6 @@
     };
   };
 
-  VortexScans.prototype.getTitleSearchResults = async function(title, page) {
-    var resultsPage = await this.fetchPostsPage(page, SEARCH_PER_PAGE, {
-      searchTerm: title
-    });
-
-    return App.createPagedResults({
-      results: mapHomeItems(resultsPage.series),
-      metadata: getNextPageMetadataFromCount(resultsPage.totalCount, resultsPage.page, resultsPage.perPage, resultsPage.pageCount)
-    });
-  };
-
   VortexScans.prototype.getArchiveSearchResults = async function(title, filters, page) {
     var resolvedPage = toPositiveInteger(page, 1);
     var response = await this.fetchJson(buildApiUrl("/query", buildArchiveQueryParams(title, filters, resolvedPage, SEARCH_PER_PAGE)));
@@ -427,21 +483,81 @@
 
   VortexScans.prototype.fetchSeriesDetails = async function(seriesId) {
     var cacheKey = cleanText(seriesId || "");
-    if (isObject(this.cachedSeriesDetails[cacheKey])) {
-      return this.cachedSeriesDetails[cacheKey];
+    if (cacheKey.length === 0) {
+      throw new Error("VortexScans requires a series id.");
+    }
+    var cached = this.cachedSeriesDetails[cacheKey];
+    if (cached && Date.now() < cached.expiresAt && isObject(cached.value)) {
+      touchCacheKey(this.cachedSeriesDetailOrder, cacheKey);
+      return cached.value;
     }
 
-    var response = await this.fetchJson(buildApiUrl("/post", {
-      postSlug: cacheKey
-    }));
-    var series = isObject(response && response.post) ? response.post : null;
+    if (!this.cachedSeriesDetailRequests[cacheKey]) {
+      this.cachedSeriesDetailRequests[cacheKey] = (async function() {
+        var response = await this.fetchJson(buildApiUrl("/post", {
+          postSlug: cacheKey
+        }));
+        var series = isObject(response && response.post) ? response.post : null;
 
-    if (!isSeriesPayload(series)) {
-      throw new Error("Unable to decode the VortexScans series payload for " + seriesId + ".");
+        if (!isSeriesPayload(series)) {
+          throw new Error("Unable to decode the VortexScans series payload for " + seriesId + ".");
+        }
+
+        storeBoundedCacheEntry(
+          this.cachedSeriesDetails,
+          this.cachedSeriesDetailOrder,
+          cacheKey,
+          { value: series, expiresAt: Date.now() + SERIES_DETAILS_CACHE_MS },
+          SERIES_DETAILS_CACHE_LIMIT
+        );
+        return series;
+      }.bind(this))();
     }
 
-    this.cachedSeriesDetails[cacheKey] = series;
-    return this.cachedSeriesDetails[cacheKey];
+    var request = this.cachedSeriesDetailRequests[cacheKey];
+    try {
+      return await request;
+    } finally {
+      if (this.cachedSeriesDetailRequests[cacheKey] === request) {
+        delete this.cachedSeriesDetailRequests[cacheKey];
+      }
+    }
+  };
+
+  VortexScans.prototype.fetchSeriesChapters = async function(series) {
+    var seriesId = cleanText(series && series.slug);
+    var seriesApiId = toPositiveInteger(series && series.id, 0);
+
+    if (seriesId.length === 0 || seriesApiId <= 0) {
+      throw new Error("VortexScans did not expose a valid series record for the chapter list.");
+    }
+
+    var requestKey = String(seriesApiId);
+    if (!this.chapterListRequests[requestKey]) {
+      this.chapterListRequests[requestKey] = (async function() {
+        var payload = await this.fetchJson(buildApiUrl("/chapters", {
+          postId: seriesApiId,
+          skip: 0,
+          take: "all",
+          order: "desc"
+        }));
+        var chapters = payload && payload.post && payload.post.chapters;
+        if (!Array.isArray(chapters)) {
+          throw new Error("VortexScans did not expose a valid chapter payload for " + seriesId + ".");
+        }
+
+        return normalizeChapterEntries(chapters);
+      }.bind(this))();
+    }
+
+    var request = this.chapterListRequests[requestKey];
+    try {
+      return await request;
+    } finally {
+      if (this.chapterListRequests[requestKey] === request) {
+        delete this.chapterListRequests[requestKey];
+      }
+    }
   };
 
   VortexScans.prototype.fetchJson = async function(url) {
@@ -464,16 +580,134 @@
 
   // Site Parsing Helpers
 
-  // Vortex renders its homepage rows through serialized Astro island props.
-  // Decode those props once, then read the arrays each section actually needs.
+  // Vortex currently server-renders its homepage cards. Keep the older Astro
+  // payload decoder as a fallback so a frontend rollback does not remove rows.
   function extractHomePageData(html) {
-    var astroPropsObjects = extractAstroPropsObjects(html);
+    var currentPopularToday = extractCurrentSectionPosts(html, "Popular Today");
+    var currentMostPopular = extractCurrentSectionPosts(html, "Most Popular");
+    var currentFeatured = enrichFeaturedPosts(
+      extractCurrentFeaturedPosts(html),
+      currentPopularToday.concat(currentMostPopular)
+    );
+    var needsLegacyFallback = currentFeatured.length === 0 || currentPopularToday.length === 0 || currentMostPopular.length === 0;
+    var astroPropsObjects = needsLegacyFallback ? extractAstroPropsObjects(html) : [];
+    var featuredCandidates = currentFeatured.length > 0 ? currentFeatured : findAstroPropsArray(astroPropsObjects, "sliderPosts");
 
     return {
-      featured: mapFeaturedHomeItems(findAstroPropsArray(astroPropsObjects, "sliderPosts")),
-      popularToday: mapPopularTodayHomeItems(findAstroPropsArray(astroPropsObjects, "posts")),
-      mostPopular: mapMostPopularHomeItems(findAstroPropsArray(astroPropsObjects, "series"))
+      featuredCandidates: featuredCandidates,
+      featured: mapFeaturedHomeItems(featuredCandidates),
+      popularToday: mapPopularTodayHomeItems(currentPopularToday.length > 0 ? currentPopularToday : findAstroPropsArray(astroPropsObjects, "posts")),
+      mostPopular: mapMostPopularHomeItems(currentMostPopular.length > 0 ? currentMostPopular : findAstroPropsArray(astroPropsObjects, "series"))
     };
+  }
+
+  function extractCurrentFeaturedPosts(html) {
+    var source = String(html || "");
+    var marker = /\baria-label="Featured series"/i.exec(source);
+    if (!marker) {
+      return [];
+    }
+
+    return extractSeriesCardsFromSection(source, marker.index, true);
+  }
+
+  function extractCurrentSectionPosts(html, heading) {
+    var source = String(html || "");
+    var headingPattern = new RegExp("<h2\\b[^>]*>\\s*" + escapeRegExp(heading) + "\\s*</h2>", "i");
+    var marker = headingPattern.exec(source);
+    if (!marker) {
+      return [];
+    }
+
+    return extractSeriesCardsFromSection(source, marker.index, false);
+  }
+
+  function extractSeriesCardsFromSection(source, markerIndex, allowMissingImage) {
+    var sectionStart = source.lastIndexOf("<section", markerIndex);
+    var sectionEnd = source.indexOf("</section>", markerIndex);
+    if (sectionStart === -1 || sectionEnd === -1 || sectionEnd <= sectionStart) {
+      return [];
+    }
+
+    var sectionHtml = source.slice(sectionStart, sectionEnd + 10);
+    var linkRegex = /<a\b([^>]*)>([\s\S]*?)<\/a>/gi;
+    var posts = [];
+    var match;
+
+    while ((match = linkRegex.exec(sectionHtml)) !== null) {
+      var anchorTag = "<a" + match[1] + ">";
+      var href = decodeAstroPropsJson(extractHtmlAttribute(anchorTag, "href"));
+      if (href.toLowerCase().indexOf("/series/") !== 0) {
+        continue;
+      }
+
+      var slug = extractSeriesSlug(href);
+      var imageMatch = match[2].match(/<img\b[^>]*>/i);
+      var imageTag = imageMatch ? imageMatch[0] : "";
+      var title = cleanText(decodeAstroPropsJson(extractHtmlAttribute(imageTag, "alt"))).replace(/^Cover of\s+/i, "");
+      if (title.length === 0) {
+        title = cleanText(decodeAstroPropsJson(extractHtmlAttribute(anchorTag, "aria-label"))).replace(/^Open\s+/i, "");
+      }
+      var image = allowMissingImage ? normalizeUrl(decodeAstroPropsJson(extractHtmlAttribute(imageTag, "data-fallback-src"))) : "";
+      if (image.length === 0) {
+        image = normalizeUrl(decodeAstroPropsJson(extractHtmlAttribute(imageTag, "src")));
+      }
+
+      if (slug.length === 0 || title.length === 0 || (!allowMissingImage && image.length === 0)) {
+        continue;
+      }
+
+      posts.push({
+        slug: slug,
+        postTitle: title,
+        featuredImage: image
+      });
+    }
+
+    return normalizeSeriesPayloads(posts);
+  }
+
+  function enrichFeaturedPosts(featuredPosts, fallbackPosts) {
+    var fallbackBySlug = {};
+    normalizeSeriesPayloads(fallbackPosts).forEach(function(post) {
+      fallbackBySlug[cleanText(post.slug)] = post;
+    });
+
+    return normalizeSeriesPayloads(featuredPosts).map(function(post) {
+      var fallback = fallbackBySlug[cleanText(post.slug)];
+      if (!fallback) {
+        return post;
+      }
+
+      return Object.assign({}, fallback, post, {
+        postTitle: cleanText(post.postTitle) || cleanText(fallback.postTitle),
+        featuredImage: resolveSeriesImage(post) || resolveSeriesImage(fallback)
+      });
+    });
+  }
+
+  function extractHtmlAttribute(tag, attributeName) {
+    var pattern = new RegExp("\\b" + attributeName + "=\\\"([^\\\"]*)\\\"", "i");
+    var match = pattern.exec(String(tag || ""));
+    return match ? match[1] : "";
+  }
+
+  function extractSeriesSlug(value) {
+    var url = cleanText(decodeAstroPropsJson(value || ""));
+    var marker = "/series/";
+    var markerIndex = url.toLowerCase().indexOf(marker);
+    var slug = markerIndex >= 0 ? url.slice(markerIndex + marker.length) : url;
+    slug = slug.split(/[/?#]/)[0];
+
+    if (slug.length === 0 || slug.indexOf(":") !== -1) {
+      return "";
+    }
+
+    try {
+      return decodeURIComponent(slug);
+    } catch (error) {
+      return slug;
+    }
   }
 
   function findAstroPropsArray(propsObjects, key) {
@@ -761,7 +995,9 @@
   }
 
   function mapFeaturedHomeItems(seriesList) {
-    return normalizeSeriesPayloads(seriesList).map(function(series) {
+    return normalizeSeriesPayloads(seriesList).filter(function(series) {
+      return resolveSeriesImage(series).length > 0;
+    }).map(function(series) {
       return createPartialSeries(series, buildGenreSubtitle(series && series.genres, 4));
     });
   }
@@ -837,7 +1073,7 @@
   function normalizeLatestReleasesView(value) {
     var rawValue = Array.isArray(value) ? value[0] : value;
     var view = cleanText(rawValue || "").toLowerCase();
-    return view === LATEST_RELEASES_VIEW_NEW ? LATEST_RELEASES_VIEW_NEW : LATEST_RELEASES_VIEW_HOT;
+    return view === LATEST_RELEASES_VIEW_NEW ? LATEST_RELEASES_VIEW_NEW : LATEST_RELEASES_VIEW_LATEST;
   }
 
   function getLatestReleasesViewSelection(value) {
@@ -845,7 +1081,10 @@
   }
 
   function getLatestReleasesViewTag(value) {
-    return normalizeLatestReleasesView(value);
+    // Paperback does not expose Vortex's optional pinned-series block as a
+    // separate row, so use the combined latest feed that the current homepage
+    // renders when pinned titles belong at the top of Latest Releases.
+    return normalizeLatestReleasesView(value) === LATEST_RELEASES_VIEW_NEW ? "new" : "latestUpdatePinned";
   }
 
   function getLatestReleasesViewLabel(value) {
@@ -907,6 +1146,17 @@
     }
 
     sections.push(App.createTagSection({
+      id: "availability",
+      label: "Availability",
+      tags: SEARCH_SALE_OPTIONS.map(function(option) {
+        return App.createTag({
+          id: SEARCH_TAG_PREFIX_SALE + option.id,
+          label: option.label
+        });
+      })
+    }));
+
+    sections.push(App.createTagSection({
       id: "sort",
       label: "Sort",
       tags: ARCHIVE_SORT_OPTIONS.map(function(option) {
@@ -934,14 +1184,23 @@
   function extractSearchFilters(query) {
     var filters = {
       genres: [],
-      status: void 0,
-      type: void 0,
-      minChapters: extractMinimumChaptersFilterValue(query),
+      excludedGenres: [],
+      statuses: [],
+      types: [],
+      saleFilter: void 0,
+      minChapters: extractPositiveIntegerSearchFieldValue(query, SEARCH_FIELD_MIN_CHAPTERS, "Minimum Chapters"),
+      maxChapters: extractPositiveIntegerSearchFieldValue(query, SEARCH_FIELD_MAX_CHAPTERS, "Maximum Chapters"),
+      createdAfter: extractDateSearchFieldValue(query, SEARCH_FIELD_CREATED_AFTER, "Created After"),
+      createdBefore: extractDateSearchFieldValue(query, SEARCH_FIELD_CREATED_BEFORE, "Created Before"),
       sortBy: void 0,
       sortDirection: void 0
     };
     var seenGenres = {};
+    var seenExcludedGenres = {};
+    var seenStatuses = {};
+    var seenTypes = {};
     var includedTags = Array.isArray(query && query.includedTags) ? query.includedTags : [];
+    var excludedTags = Array.isArray(query && query.excludedTags) ? query.excludedTags : [];
 
     includedTags.forEach(function(tag) {
       var tagId = String(tag && tag.id || "");
@@ -954,13 +1213,29 @@
         return;
       }
 
-      if (tagId.indexOf(SEARCH_TAG_PREFIX_STATUS) === 0 && filters.status === void 0) {
-        filters.status = tagId.slice(SEARCH_TAG_PREFIX_STATUS.length);
+      if (tagId.indexOf(SEARCH_TAG_PREFIX_STATUS) === 0) {
+        var status = tagId.slice(SEARCH_TAG_PREFIX_STATUS.length);
+        if (hasFilterOption(SEARCH_STATUS_OPTIONS, status) && !seenStatuses[status]) {
+          seenStatuses[status] = true;
+          filters.statuses.push(status);
+        }
         return;
       }
 
-      if (tagId.indexOf(SEARCH_TAG_PREFIX_TYPE) === 0 && filters.type === void 0) {
-        filters.type = tagId.slice(SEARCH_TAG_PREFIX_TYPE.length);
+      if (tagId.indexOf(SEARCH_TAG_PREFIX_TYPE) === 0) {
+        var type = tagId.slice(SEARCH_TAG_PREFIX_TYPE.length);
+        if (hasFilterOption(SEARCH_TYPE_OPTIONS, type) && !seenTypes[type]) {
+          seenTypes[type] = true;
+          filters.types.push(type);
+        }
+        return;
+      }
+
+      if (tagId.indexOf(SEARCH_TAG_PREFIX_SALE) === 0 && filters.saleFilter === void 0) {
+        var saleFilter = tagId.slice(SEARCH_TAG_PREFIX_SALE.length);
+        if (hasFilterOption(SEARCH_SALE_OPTIONS, saleFilter)) {
+          filters.saleFilter = saleFilter;
+        }
         return;
       }
 
@@ -980,40 +1255,49 @@
       }
     });
 
-    return filters;
-  }
+    excludedTags.forEach(function(tag) {
+      var tagId = String(tag && tag.id || "");
+      if (tagId.indexOf(SEARCH_TAG_PREFIX_GENRE) !== 0) {
+        return;
+      }
 
-  function hasActiveSearchFilters(filters) {
-    if (!filters || !isObject(filters)) {
-      return false;
+      var genreId = tagId.slice(SEARCH_TAG_PREFIX_GENRE.length);
+      if (genreId.length > 0 && !seenExcludedGenres[genreId]) {
+        seenExcludedGenres[genreId] = true;
+        filters.excludedGenres.push(genreId);
+      }
+    });
+
+    if (filters.minChapters !== void 0 && filters.maxChapters !== void 0 && filters.minChapters > filters.maxChapters) {
+      throw new Error("Minimum Chapters cannot be greater than Maximum Chapters.");
+    }
+    if (filters.createdAfter && filters.createdBefore && filters.createdAfter > filters.createdBefore) {
+      throw new Error("Created After cannot be later than Created Before.");
     }
 
-    return (Array.isArray(filters.genres) && filters.genres.length > 0) ||
-      cleanText(filters.status).length > 0 ||
-      cleanText(filters.type).length > 0 ||
-      toPositiveInteger(filters.minChapters, 0) > 0 ||
-      hasArchiveSort(filters);
-  }
-
-  function hasArchiveSort(filters) {
-    return cleanText(filters && filters.sortBy).length > 0 ||
-      cleanText(filters && filters.sortDirection).length > 0;
+    return filters;
   }
 
   function buildArchiveQueryParams(title, filters, page, perPage) {
     var sortOption = getArchiveSortOption(filters && filters.sortBy) || getArchiveSortOption("latest_chapters");
     var minChapters = toPositiveInteger(filters && filters.minChapters, 0);
+    var maxChapters = toPositiveInteger(filters && filters.maxChapters, 0);
+    var seriesTypes = Array.isArray(filters && filters.types) ? filters.types : [];
     var params = {
       page: toPositiveInteger(page, 1),
       perPage: toPositiveInteger(perPage, SEARCH_PER_PAGE),
       view: "archive",
-      seriesType: cleanText(filters && filters.type) || ARCHIVE_DEFAULT_SERIES_TYPES,
+      seriesType: seriesTypes.length > 0 ? seriesTypes.join(",") : ARCHIVE_DEFAULT_SERIES_TYPES,
       orderBy: sortOption.orderBy,
       orderDirection: getArchiveOrderDirection(filters && filters.sortDirection, sortOption.defaultDirection)
     };
     var searchTerm = cleanText(title || "");
     var genreIds = Array.isArray(filters && filters.genres) ? filters.genres : [];
-    var seriesStatus = cleanText(filters && filters.status);
+    var excludedGenreIds = Array.isArray(filters && filters.excludedGenres) ? filters.excludedGenres : [];
+    var seriesStatuses = Array.isArray(filters && filters.statuses) ? filters.statuses : [];
+    var saleFilter = cleanText(filters && filters.saleFilter);
+    var createdAfter = cleanText(filters && filters.createdAfter);
+    var createdBefore = cleanText(filters && filters.createdBefore);
 
     if (searchTerm.length > 0) {
       params.searchTerm = searchTerm;
@@ -1021,28 +1305,43 @@
     if (genreIds.length > 0) {
       params.genreIds = genreIds.join(",");
     }
-    if (seriesStatus.length > 0) {
-      params.seriesStatus = seriesStatus;
+    if (excludedGenreIds.length > 0) {
+      params.excludedGenreIds = excludedGenreIds.join(",");
+    }
+    if (seriesStatuses.length > 0) {
+      params.seriesStatus = seriesStatuses.join(",");
+    }
+    if (saleFilter.length > 0) {
+      params.saleFilter = saleFilter;
     }
     if (minChapters > 0) {
       params.minChapters = minChapters;
+    }
+    if (maxChapters > 0) {
+      params.maxChapters = maxChapters;
+    }
+    if (createdAfter.length > 0) {
+      params.createdAfter = createdAfter;
+    }
+    if (createdBefore.length > 0) {
+      params.createdBefore = createdBefore;
     }
 
     return params;
   }
 
-  function createMinimumChaptersSearchField() {
+  function createSearchField(id, name, placeholder) {
     var field = {
-      id: SEARCH_FIELD_MIN_CHAPTERS,
-      name: "Minimum Chapters",
-      placeholder: "e.g. 10"
+      id: id,
+      name: name,
+      placeholder: placeholder
     };
     return typeof App !== "undefined" && App && typeof App.createSearchField === "function" ? App.createSearchField(field) : field;
   }
 
-  function extractMinimumChaptersFilterValue(query) {
+  function extractSearchFieldValue(query, fieldId) {
     var parameters = isObject(query && query.parameters) ? query.parameters : {};
-    var values = Array.isArray(parameters[SEARCH_FIELD_MIN_CHAPTERS]) ? parameters[SEARCH_FIELD_MIN_CHAPTERS] : [];
+    var values = Array.isArray(parameters[fieldId]) ? parameters[fieldId] : [];
     var rawValue = "";
 
     for (var index = 0; index < values.length; index += 1) {
@@ -1055,16 +1354,41 @@
     if (rawValue.length === 0) {
       return void 0;
     }
+    return rawValue;
+  }
+
+  function extractPositiveIntegerSearchFieldValue(query, fieldId, fieldLabel) {
+    var rawValue = extractSearchFieldValue(query, fieldId);
+    if (rawValue === void 0) {
+      return void 0;
+    }
     if (!/^\d+$/.test(rawValue)) {
-      throw new Error("Minimum Chapters must be a positive whole number.");
+      throw new Error(fieldLabel + " must be a positive whole number.");
     }
 
-    var minChapters = parseInt(rawValue, 10);
-    if (!isFinite(minChapters) || minChapters <= 0) {
-      throw new Error("Minimum Chapters must be a positive whole number.");
+    var value = parseInt(rawValue, 10);
+    if (!isFinite(value) || value <= 0) {
+      throw new Error(fieldLabel + " must be a positive whole number.");
     }
 
-    return minChapters;
+    return value;
+  }
+
+  function extractDateSearchFieldValue(query, fieldId, fieldLabel) {
+    var rawValue = extractSearchFieldValue(query, fieldId);
+    if (rawValue === void 0) {
+      return void 0;
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(rawValue)) {
+      throw new Error(fieldLabel + " must use YYYY-MM-DD format.");
+    }
+
+    var parsed = new Date(rawValue + "T00:00:00.000Z");
+    if (isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== rawValue) {
+      throw new Error(fieldLabel + " must be a valid date in YYYY-MM-DD format.");
+    }
+
+    return rawValue;
   }
 
   function getArchiveSortOption(sortBy) {
@@ -1119,6 +1443,12 @@
     });
   }
 
+  function hasFilterOption(options, id) {
+    return (Array.isArray(options) ? options : []).some(function(option) {
+      return cleanText(option && option.id) === id;
+    });
+  }
+
   // Detail Helpers
 
   function buildDetailTagSections(series) {
@@ -1146,6 +1476,16 @@
         label: "Type: " + typeLabel
       }));
     }
+
+    addDetailMetadataTag(metadataTags, "released", "Released", series && series.releaseDate);
+    addDetailMetadataTag(metadataTags, "studio", "Studio", series && series.studio);
+    addDetailMetadataTag(metadataTags, "chapters", "Chapters", formatCount(series && series._count && series._count.chapters));
+    addDetailMetadataTag(metadataTags, "added", "Added", formatDateMetadata(series && series.createdAt));
+    addDetailMetadataTag(metadataTags, "last-update", "Last Update", formatDateMetadata(series && series.lastChapterAddedAt));
+    addDetailMetadataTag(metadataTags, "views", "Views", formatCount(series && series.totalViews));
+    addDetailMetadataTag(metadataTags, "favorites", "Favorites", formatCount(series && series._count && series._count.bookmarks));
+    addDetailMetadataTag(metadataTags, "rating-count", "Rating Count", formatCount(series && series.totalRatings));
+    addDetailMetadataTag(metadataTags, "sale", "Sale", formatSaleMetadata(series));
 
     (Array.isArray(series && series.genres) ? series.genres : []).forEach(function(genre) {
       var id = cleanText(genre && genre.id);
@@ -1178,6 +1518,64 @@
     }
 
     return sections;
+  }
+
+  function addDetailMetadataTag(tags, id, label, value) {
+    var clean = cleanText(value);
+    if (clean.length === 0) {
+      return;
+    }
+
+    tags.push(App.createTag({
+      id: id + ":" + toOptionId(clean),
+      label: label + ": " + clean
+    }));
+  }
+
+  function formatCount(value) {
+    if (value === null || value === void 0 || cleanText(value).length === 0) {
+      return "";
+    }
+
+    var count = toNumber(value, NaN);
+    if (!isFinite(count) || count < 0) {
+      return "";
+    }
+
+    return String(Math.floor(count));
+  }
+
+  function formatDateMetadata(value) {
+    var raw = cleanText(value);
+    if (raw.length === 0) {
+      return "";
+    }
+
+    var parsed = new Date(raw);
+    return isNaN(parsed.getTime()) ? raw : parsed.toISOString().slice(0, 10);
+  }
+
+  function formatSaleMetadata(series) {
+    if (!series || series.saleActive !== true) {
+      return "";
+    }
+
+    var percentage = toNumber(series.salePercentage, 0);
+    if (percentage <= 0 || percentage >= 100) {
+      return "";
+    }
+
+    var saleEndRaw = cleanText(series.saleEndDate);
+    if (saleEndRaw.length > 0) {
+      var saleEnd = new Date(saleEndRaw);
+      if (!isNaN(saleEnd.getTime()) && saleEnd.getTime() <= Date.now()) {
+        return "";
+      }
+    }
+
+    var label = String(Math.floor(percentage)) + "% off";
+    var endDate = formatDateMetadata(series.saleEndDate);
+    return endDate.length > 0 ? label + " until " + endDate : label;
   }
 
   function buildTitles(primaryTitle, alternativeTitles) {
@@ -1266,6 +1664,20 @@
     return 0;
   }
 
+  function getChapterDisplayDate(chapter) {
+    var becameFreeAt = parseDate(chapter && chapter.becameFreeAt);
+    if (becameFreeAt.getTime() > 0) {
+      return becameFreeAt;
+    }
+
+    var updatedAt = parseDate(chapter && chapter.updatedAt);
+    if (updatedAt.getTime() > 0) {
+      return updatedAt;
+    }
+
+    return parseDate(chapter && chapter.createdAt);
+  }
+
   function buildChapterName(number, title) {
     var cleanTitle = cleanText(title || "");
     if (cleanTitle.length > 0 && number > 0) {
@@ -1301,19 +1713,29 @@
       return CHAPTER_ACCESS_UNKNOWN;
     }
 
-    if (chapter.isAccessible === true || chapter.isLocked === false) {
+    if (chapter.isAccessible === true || chapter.chapterPurchased === true || chapter.isPurchased === true) {
       return CHAPTER_ACCESS_READABLE;
     }
 
-    if (chapter.isAccessible === false ||
-      chapter.isLocked === true ||
+    var unlockAt = parseDate(chapter.unlockAt);
+    var unlockTime = unlockAt.getTime();
+    var hasUnlockTime = unlockTime > 0;
+    var futureUnlock = hasUnlockTime && unlockTime > Date.now();
+    var expiredTimedUnlock = hasUnlockTime && unlockTime <= Date.now() && chapter.isPermanentlyLocked !== true;
+
+    if (expiredTimedUnlock) {
+      return CHAPTER_ACCESS_READABLE;
+    }
+
+    if (chapter.isLocked === true ||
       chapter.isLockedByCoins === true ||
       chapter.isPermanentlyLocked === true ||
-      toNumber(chapter.finalPrice, toNumber(chapter.price, 0)) > 0) {
+      futureUnlock ||
+      chapter.isShortLinkLocked === true && futureUnlock) {
       return CHAPTER_ACCESS_LOCKED;
     }
 
-    return CHAPTER_ACCESS_UNKNOWN;
+    return CHAPTER_ACCESS_READABLE;
   }
 
   function shouldIncludeChapterForList(chapter, showLockedChapters) {
@@ -1444,8 +1866,31 @@
     return cleanText(value || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
   }
 
+  function escapeRegExp(value) {
+    return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
   function isObject(value) {
     return value !== null && typeof value === "object";
+  }
+
+  function touchCacheKey(order, key) {
+    var index = order.indexOf(key);
+    if (index !== -1) {
+      order.splice(index, 1);
+    }
+    order.push(key);
+  }
+
+  function storeBoundedCacheEntry(cache, order, key, entry, limit) {
+    cache[key] = entry;
+    touchCacheKey(order, key);
+    while (order.length > limit) {
+      var oldest = order.shift();
+      if (oldest !== void 0 && oldest !== key) {
+        delete cache[oldest];
+      }
+    }
   }
 
   // Exports

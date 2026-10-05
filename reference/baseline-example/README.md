@@ -31,7 +31,7 @@ The current normal sources differ heavily in implementation style:
 - GenzToon is HTML-first. Its core work is homepage block extraction, shared series-index parsing, source-local genre normalization, and detail/chapter scraping with locked-chapter handling.
 - DivaScans is API-first for details, archive/search, and chapter data, but also reads server-rendered homepage payloads for multiple rows and needs source-specific genre normalization.
 - MadaraScans is HTML-first with WordPress AJAX pagination. Its core work is page fetching, browse URL building, AJAX row loading, card/detail parsing, and locked chapter/page detection from HTML.
-- VortexScans is hybrid. It uses API endpoints for archive/detail/chapter data, but also decodes serialized Astro homepage props and keeps archive sort/order/filter mapping aligned with the live frontend.
+- VortexScans is hybrid. It uses API endpoints for archive/detail/chapter data, parses the current server-rendered homepage rows with a legacy Astro fallback, and keeps archive sort/order/filter mapping aligned with the live frontend.
 - ComixTo is API-first with signed chapter endpoints, rich browse/home filters, server-rendered browse option fallback, and source settings for content, homepage, and chapter-group handling.
 
 Even with those differences, the current live sources still imply the same generalized structural baseline:
