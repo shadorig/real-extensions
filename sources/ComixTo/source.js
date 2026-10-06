@@ -15,8 +15,25 @@
   var HOME_PAGE_SIZE = 20;
   var SEARCH_PAGE_SIZE = 20;
   var CHAPTERS_PAGE_SIZE = 100;
+  var CHAPTER_PAGE_BATCH_SIZE = 4;
+  var MAX_CHAPTER_PAGES = 200;
+  var TAG_ID_CACHE_SIZE = 50;
+  var TAG_ID_CACHE_TTL_MS = 30 * 60 * 1000;
+  var TAG_ID_EMPTY_CACHE_TTL_MS = 2 * 60 * 1000;
+  var CHAPTER_SHARE_URL_CACHE_SIZE = 500;
+  var TITLE_DATA_CACHE_SIZE = 5;
+  var TITLE_DATA_CACHE_TTL_MS = 2 * 60 * 1000;
+  var FILTER_CACHE_TTL_MS = 30 * 60 * 1000;
+  var PERSISTED_FILTER_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+  var FALLBACK_FILTER_CACHE_TTL_MS = 2 * 60 * 1000;
+  var HOME_HTML_CACHE_TTL_MS = 5 * 60 * 1000;
+  var TOP_SECTION_PAGE_SIZE = 50;
+  var TRANSIENT_HTTP_STATUSES = { 502: true, 503: true, 522: true, 523: true };
   var SECTION_ID_FEATURED = "featured";
   var SECTION_ID_FOLLOWS = "follows";
+  var SECTION_ID_FOLLOWS_ALL = "follows_all";
+  var SECTION_ID_TRENDING_MANGA = "trending_manga";
+  var SECTION_ID_TRENDING_WEBTOONS = "trending_webtoons";
   var SECTION_ID_LATEST = "latest";
   var SECTION_ID_NEW = "new";
   var SECTION_ID_COMPLETE = "complete";
@@ -29,8 +46,15 @@
   var TAG_PREFIX_SORT = "sort:";
   var TAG_PREFIX_AUTHOR = "author:";
   var TAG_PREFIX_ARTIST = "artist:";
+  var TAG_PREFIX_YEAR = "year:";
   var TAG_PREFIX_GENRE_MODE = "genre_mode:";
   var SEARCH_FIELD_MIN_CHAPTERS = "min_chapters";
+  var SEARCH_FIELD_AUTHOR = "author";
+  var SEARCH_FIELD_ARTIST = "artist";
+  var SEARCH_FIELD_TAGS = "tags";
+  var SEARCH_FIELD_YEAR_FROM = "year_from";
+  var SEARCH_FIELD_YEAR_TO = "year_to";
+  var OLDEST_RELEASE_YEAR = 1928;
   var DEFAULT_SORT = "chapter_updated_at:desc";
   var SEARCH_DEFAULT_SORT = "relevance:desc";
   var LATEST_UPDATES_VIEW_HOT = "hot";
@@ -40,6 +64,8 @@
   var GROUP_MODE_HIDE = "hide";
   var GROUP_MODE_ONLY = "only";
   var GROUP_MODE_PREFER = "prefer";
+  var GROUP_MATCH_EXACT = "exact";
+  var GROUP_MATCH_CONTAINS = "contains";
   var STATE_CONTENT_RATING = "content_rating";
   var STATE_LATEST_UPDATES_VIEW = "latest_updates_mode";
   // These legacy state keys keep existing user settings compatible.
@@ -47,14 +73,24 @@
   var STATE_MOST_FOLLOWED_RANGE = "most_follows_range";
   var STATE_HOME_DEMOGRAPHICS = "home_demographics";
   var STATE_HOME_TYPES = "home_types";
+  var STATE_EXTRA_HOME_SECTIONS = "extra_home_sections";
+  var STATE_HIDDEN_TERMS = "hidden_terms";
+  var STATE_REQUIRED_TERMS = "required_terms";
+  var STATE_REQUIRED_TERMS_MODE = "required_terms_mode";
   var STATE_CHAPTER_GROUP_MODE = "chapter_group_mode";
+  var STATE_CHAPTER_GROUP_MATCH = "chapter_group_match";
   var STATE_CHAPTER_GROUP_FILTER = "chapter_group_filter";
+  var STATE_FILTER_CACHE = "filter_cache_v2";
+  var STATE_FILTER_CACHE_LEGACY = "filter_cache_v1";
   var B64_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  var COMIX_IMAGE_ALGO2_TAPS = 0x3ec241;
+  var COMIX_IMAGE_ALGO2_PACKED = "IQHFT9HQGrIldMs3iq71sQgIkRkzuetP8iml5Ns+VxQBKOD0+uJ+B/EaQye36UVUrYU7s8zVtNTUVNONbSYAx2Cw1ErtzI6REGDcBTbNn9CFFMbABEwHTzl7OF2/ycDam+GQ97ygSAq70+qhcBhlDXkRcZAYWlemqsadQNzWmi0AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEICggYaI1m2KjvKPQkkPv6//zWbiOiKmedkBDUg2cN30Xs9aiKn5d1UhRW2IgNcNEzzmnBMqveDYHmR+c2PfMImMIJWGY3nc9yeNTtdmtHWDKJDqt2DU1Hvjli3/7JAQk1IPce/K+1EgVcKkMcRrQj1J+QSmXly41XV55sVXEHphAQEDDRn+VOgRfzuK3SOelotmKmLITIOiQg1hgFGofR6IgLIEa0+XcN1Gh1qZyq2YdDYnEoQl3oWQL0q4zKjaGM7Rn6DSgP+0pKBA5Rww8K37vakCljpNIfnBtNFdvNCHdjlaMWfhngjAKOZ7TrEFQfSq7y1q9WyvzLPbDtDTncICCl6jAz81/LloI/EUsW/9CUJy5cDnSMmFe4t/bUr5Rj/ZHsyecDiMvYHWJGZJM4ZgffjTK23PXE38+pUQrHTsI8ecNmVHHMlPSWVzTDBaVYSABdxDacjUCDrp7Oa3LBAKgU6IrjbMDee9jgQl18FMlTW7cXaae2ahN0oa7kRbzFT1NplBIazMCRzcWmjciiYYcU97UQ7P+K7uVLGlqEZ+Un8fFQz44MnDjXuncXZ3Q4DvtU44/Lv56CnJh7NlU+jbitzdhRRgRKihnib5gdi0sxzjn6zDhHt06fQQgSeNcnnA8p5HT0DJODZmq1y/DjuFvCF822Z1tai4YJRCI78YqaovFKZfc9L6bCBqZZSmJtO3wJ26PPQqc4O16BBGkgxagh5BXS8x4L1KvsPEXetnlWJhjB/C8GYcw49DeivLLf/uUJvYUjpz/GCMune/NFvvIne091D0B+77atFTkv3xjDU7Y54TGHqYIt6/zPMV9Qz/fWWch3oFOJhfVfr0OPETFjJ5sQNGUmoSnBvTIj6I9zFwtBmrC0fPH6BX0KOIX7baz8j8t8/Qsm78nuduJ1CivBiIaX+hcwchYr/NrPP0WiOxJnV55vRmHSk0j/pG7J1+4Y4gIAbzsNiOn6t/Z/sa5ntudLYPZ7bxhW5AXVP57jr2fF1oX8NeLGQgrrjO4iYsJLMoej2QkovelfRrmn9lLa2OQlILAsssjoLjx1MSa0D8ngLZT88o6zVWqhmlOfouCo7zaU4yY1DBy/SoRPxjKT5+jNlNxtmbXZ2ZKs5ZYBpIOsqAV3ZtMCfsFDrs2gDkUSh1ISfZ+ZiuQnI8G4r4m6/4EOyZtaEi82xGWLAEBEjg/W56l7PeTkIc2dNjmerM59oPwKZ0fd0c6OuE1QQZnsMhcL44U+V3hLnYORZg8q1x8TLRexj2ZpiQu6Sone7DsSRvueMRTDetHMwxBpxa/jo2q4ZQDhRdUpsNtx9cf8gAfG57ECHE5+rA+jWOA7X4Wk5b6Dxe8I/wx6l7xUgIkYOU4FB3wpJs0XmYvOTnNVFSDoVNy8OfNan0IFbZL9UPwjw+TfQaMXc0ZKBD36C/uEJ6Yf67T2Of/qXEYIGRNiKBGYcbg8DCxxxeI2ZI160pVp86HvXlQ8JQrGHKGREpnDL1u2nL/CauoFXgTl+QG3ocUbH61jkEPzD/L/NM0BEjDV1jW1YDGEqaKr+CLtakuzYE/s91N/tUgSTDzaYsTb5XrWvJM1YwazVzVzrM6+kHcI2/gHMHxq4DDOjODo/3bjxrBVvQ+QgWkjZ+BBOm0qI/5klJCXFHIXj+6seHK/+h7KEdt5llS5W/+rvhPuYQAS99LhGcRxfpgPrcWABgIg5KWwVxWF3Xh5iiIj13FG8PwxC96TJpJfqG9T4H4MIWBUAYHgv/RkS21mFNpRNqzYa0eSRn2ISQNorSVUq8mS5kSF49VOE6/Icsa+OkaQodoVB4BuZ7ihRIzhl18mJuQtYKztZL6eDdcYeD6Flc7q15k9AQp7XYbfhuQQ9LnEAMRCXcFAZZFX3JEu+C5xC2ROxMBdH5gFaxQgugreJzvLdQ5Hh0A0s68UOArFajH2DyGsSpZGVCg3kXUD9SeC0TtlY4CvCC/h9ndZ43PsMTC4/S+3YP4NW0wgMsGMc75PmV5M0kYFNlVAzfX7FGHjUOepl2lUDlsVea7JwFcSOGwBiIC7Jc5xFgecy3HKlhwB7Y3lfxxCU7xCpbSPiKCcpbguWHaofIQozwkgWFlKiS325rCTMMU8uz5dU2EqVxHWoRc+PMC57xY1T/2bOOEd5Dzt5XgMN7M/MTQPGALqtuazMY7F/80lX4IJHErFbOmIo9TDO55O55Y6l3CobVC4PAMRAfdnwPlRpzwFgP/0EPGa4zumu8IJ2Z9uagWORDjcIMNQ2ugGyeRPLePSKocNUb4BW1lWYQIL+NjRr40XdfSsHBVBxi7QbXZFkDtI2tqIRe+oJmQiZp5QwfQlP6Xg7EyCauVJEIjJMQDRX3QoF7e6e+4Z2uqaJKF6z3mCbL0cAiKGYViJbAneur85uEy4SXJG2JSw9cimsbFo9U25tGtqbupnfCrj2pbhh1dqmbj1YbGQFYhmxXGQ5/teWQ1BK/8JtAdCYDEKPdXks6hme0ixT7Yyfgsgxa+tpWhxW/Vvls9mvKimrkimU72sQMgGab2sfAnvLJykudUxuxankCgAxIPUtzOFTDAuxQEKWuIFfMAoWVDGRk0U6nckY30jJmuVypFqW/wkvjQhfDEzYkYqIZ7YCEnBGhGhXcKz7GTXoTpBoByj/ylHQ03kvTKC8J2xH58pzJ4b/P1BipSrgga7yDFsq7aGivg9f8D566ds8pBn5uG14bgqskqA7rY+BIQCFSpFBI4Hxqf8czDBibsUY20BNuvn3W4zn6w375enTQAxOpgxa4fOvvAvF/BbmFICnb/gHvadk4+TDIuIhWGFl6oK0/4Exe+s6rN1YvZ51WH2hScm7gWi1nRD3406BLGILQyR8k8mINvhihi/msMZqCgDn7HgDG6vRoc8nHP1CAAIMmiBJHZuxfuD/aJEh4LQudzuqw4Ji6yLLpwB+dHapimq39+Q7Wm4GfUfvxB/LUq3d5S8k79djBAUMW6z+z97oan4NLK0yHqRn3LT0/fFV9kSYm+dpkbWLjzP9/A8QjdAX7WNHh2Lbh7kmFZ5BlKYsszPsVQH2HGDLRvNJG4QInKgGTtzRMZa8JH2rTIcFrqU4HvQ9JfuH1RXFyTSw3K3oQRyxVc+AkmCS0GMTsZJjTIiSYMrkK8LZ1V6A0Fbs3V/bfDTHL86iHszHQlhjDe/4+P9YGwI7JfB7fLaHq/o++Sx/UFPKBMZoFbK31V/b5ebUZ8SWQKUUfsCrPGT2CBAZMskdGQfQXZJxZjh0W9awMbG/JwaCJn1bgB8GJdjLFnOyG5K+Vy90yneNQ5R+DoyY+QNT+Qj7SSoZaAA6UlYz8QXj4pRZ1ACWzXjONJ4Qy9YCJhkU39K+fFOfg6e3SI3FRtHk0VZt0bemzgQg5pHwZrSF9vJCdQxk9Ay9vywQAVCAWIUgKNQ3pwOnZo9E6bf71aiQLQ+nNipq8++VYG0YFuGU7SU4pOmJhOOR1h+RNMbeJ8O/5qF11Kz45un0oGTwBdofdxAM+L2VoY3MmRIVqGlsd7q1t6VpPOBaUAy1IhNCQTem5ZB0DnO6WmXUVPHDuJ6xXOhvN1gg96Ae1CACoAggCzCggSo198O7bGQzLyjDm4HSmlcVcev2Mksx7ONb486zz1XBvtJ1t5kvsqgTn742O+VXUk3HsQZl1lk/t1WLMgv51RdVhgkHJyIM3/tqFS8NmzXlDjY2+nlGNBvx9iGkaQ6q7SZgD4ELskLTwxtisfeWFTXcsozhI+nRQARAGNiuwm5WGuXtDDrlnfOU74LuxPubIp7TDKrPV8MzXVQdcsWBUWM81RjNSxG2oVPVu/Gq5nyPYZtK6AbYUk8dpyRcaeIg5UsPa73L8cAH/ZGa6iODydGycg9CTOP/6LTK7JnYgRBikuxGfhVZfvm3L6ZLNzUQRG2M6YZfuIWACIAwsFQcRUUlS82qQuuRDLKzOVjhYvz+dkdsBjQ41ELKqGfEQsEt7SREioO/7gF3F6Ssg3ccjTbW8qYSsITBozVmIDGKjiilSD5+Zw5TlTB5n4NGMfFQQIZNSz8XNKCxHKF/S0ibKYZIvIfhkL7/EjP3sPa6sTHY3PrKHQK+0AAQIQKtsQhesFN6kOl5p7z1D7paZx0bHqzEQcFHOMWi1fze3j6X0Xsm3WSwuC4q5xhfI97YzAMioI1a+X6WS3Wi9uRSSV02crSboJQI+q/9/GQs25SudW4Es7Ehw4gQMvSdpqzmNLBLDOt4+9lbT0pdFeW1j7F5K5guchPEHm2JACBCDOsgz5DZ/WSQTihKFlr4rgjv7C64fdsvbAptD3AzEzQB3QLJzwKr5Fh9Ax8tKQ9HJTUYUUUOj6CIl9MKHSMiVKjVYFiS5eyyPc8qy8qLxRfRGZZ6xGoQ+05JieroGnAiAtlh2VkwAB7SGsx0xgtJY9KaR8YJat1llvoJiWgAQIyhDC+AtuyXWN17v1J03dvYgn9Ahsk0R8bO9zdWDY/kSQrNpwKepVgh7Oz7AYSKfbXMC1+4CJjjwIZd+BhwAMDfCvqGC2hpAld0ECPCTNBnfhtobsklMZ9ohD3aJ8SDyYTax2k2Q7QIsgufZbg9XKuAmySr2Lnh0/kTflCIDACAOSD8vWRAcglc89EbBUgVG5eiuK5oXQfmSzzuIgVSGIo3UPTOIPAEMq1+ePGLxxs6hPmeePsUMKaOA1i9EyDna5yd1Kt22pQuDMMLi0l4YG91txE7U+2FUjxPFdUoAQke57PD0mbo7dCqM93sN7sTlYR7zTUa/EUuNUZfYPBRACEQhVi5qJJ3041WAXNItpqGjeeXzTAv2diRfrs0eBQzEo/AH1iE0x4GbN7XowWfBJPbF2o3oYkkTUrzcK8ExSkGughq9chCi437F8PCYdACWT4IRNUjG8x3ylv7b5AxI+ncRDOGe6X5ISShvf7JVzPMTCP5S6RKjMkJarthghAAQiACIHMg9a234a2RHNHH5n2q/dUpk8Sp25nWPntTCldP7fGGm3O2h+5CDGc2i+25D+TlHDUrQIGZbT3gpmgAi+x3ULX72I/nWBVOT13RYuYYdvnjeO7lQx7mbicUUwK0CEn6XM5eUIACW5swp+lNbtKBneA0S6dDO4I+34IlQgCESJRBniDCRx9G+7/9q+NYOy1GlycjnM9TD0DUcioQl0Pe4pUzg2TSQRgAZjz+Lss21c+RVq4kQpdjjjCNSEVuqXMpoq8QY1fE941PWi7AAR2Jm2oMXN571MFMPg1SrT3Uyqk8EQV0jMRCHlwzjl7s2aK/7fyCsnv2vHFvpANI";
+  var decodedComixImageAlgo2Table = null;
   var CONTENT_RATING_OPTIONS = [
-    { id: "safe", label: "Safe" },
-    { id: "suggestive", label: "Suggestive" },
-    { id: "erotica", label: "Erotica" },
-    { id: "pornographic", label: "Pornographic" }
+    { id: "safe", label: "Safe only" },
+    { id: "suggestive", label: "Up to Suggestive" },
+    { id: "erotica", label: "Up to Erotica" },
+    { id: "pornographic", label: "Up to Pornographic" }
   ];
   var LATEST_UPDATES_VIEW_OPTIONS = [
     { id: LATEST_UPDATES_VIEW_HOT, label: "Hot" },
@@ -80,84 +116,23 @@
     { id: "manhua", label: "Manhua" },
     { id: "other", label: "Other" }
   ];
+  var EXTRA_HOME_SECTION_OPTIONS = [
+    { id: SECTION_ID_TRENDING_MANGA, label: "Trending Manga" },
+    { id: SECTION_ID_TRENDING_WEBTOONS, label: "Trending WebToons" }
+  ];
+  var REQUIRED_TERM_MODE_OPTIONS = [
+    { id: "and", label: "Require All Selected Terms" },
+    { id: "or", label: "Require Any Selected Term" }
+  ];
   var GROUP_MODE_OPTIONS = [
     { id: GROUP_MODE_ALL, label: "Show All Groups" },
     { id: GROUP_MODE_HIDE, label: "Hide Matching Groups" },
     { id: GROUP_MODE_ONLY, label: "Only Matching Groups" },
     { id: GROUP_MODE_PREFER, label: "Prefer Matching Group" }
   ];
-  // Static port of Comix's public tfl4t2 request signer and envelope decoder.
-  // Refresh from secure-tfl4t2-BRlFkaym.js when the public bundle id changes.
-  var COMIX_CIPHER_STAGES = [
-    {
-      table: "haySVASzgso1XvPOR+534yE/rV3FbsM6SmZcaxymULBY2KecuXwI4NB/G3S0FH0OMrzHiHv2WXqKIpT8j8Hqdkmp+P82LUZwLCbmrp4NZCTwDJUZH1pzN8w0TBqJo9QlCW0vPGcA9L64oe/ZS/m//rYHjitRzWAuxKCZdTEgfrXdEVb7mDjXYqr6TegSW9NEAz2o54Z4Pt4K7TPS7MYQvcjJ9zuajEiQYXmEFg/1QygLm6KAunHaHq+lT29ftzDkQcIBZRhF4uFqg5efHcvplofVgbKN/QblKbEVUmnb8vFjnWzrwJNo3xdTu9EqE06rcidXAgVCOdZApFUji5Hczw==",
-      key: "LbvnM0tqpqYeHgDpUAnnKlmLndE9Zanimj8=",
-      seed: 92
-    },
-    {
-      table: "ujbY8ugLILk1uEvtVtd6fxvVkJyUw0bPaCh7McAySAFao/hfjN+1q4lhkQAWI5pNZG1mLhlBeVe8/+VDdspbgskJnu8YOfeY68QkDCmVUfS/zm7TbCUFUi2DcwiBtFPWB/lK0L6osqYX+41UK6QVTw2982NgdbfHM5bccAS7tkKlIbCbrg+TOIv80upycROHhsGnaybGQA4GqfoQn+OIXI/UHH1O5IU3MMgSFEdql+lMzCf+y2kD3h/dWa+xKgJ4meDREcL1gI47HoriWDSzrZ0iPOFlXnfuPfDs9jqifKxESS/ZLM10VW9QGpJi2+ah2n6q8UX9P6AdxQpnPoTnXQ==",
-      key: "ydX4N9AMLlSdM4rDfFkKmCKFF9/5srl++t6+dw==",
-      seed: 147
-    },
-    {
-      table: "FGQy+D4NCgfFIs0EWzX6edMrk1gnj1TvsNz952XZ8GJIX3cv1IzyXoOXQ+B9EuTbe+46iUF4/pxEG1XSCK8ZcVHDoW/rtMeITtG+P84zwLwJ/wBraHY9TAxPJelp1SzKnZbPGHNs86sulb0LqCHWECCtheX0qTc7SqS5HIdtxGdCS1K3HYCnXepykaqN+df10DZaf1AOFQKBgrVHxrOj40WOF96gm2aY4gMkngWyBt88OKK/5g8t4dgRi1nBKctgsfdhJvvt2obddZlufgEeTej8GhMorDkWusyKNJ+4lJCEu/a2asKaSfHJY1euRnxcQFZTpnowcMgxI6Uf7Cp0kg==",
-      key: "BpB1hZ2zP4Yfc7NjuClhFbjsVlO8YA==",
-      seed: 170
-    }
-  ];
-  var decodedComixCipherStages = null;
-  var COMIX_SIGNER_RC4_KEYS = [
-    "EO8fB2AQIKXZ5A/qaoglOT88IrBPN9r8lRNmm+KEUzI=",
-    "Ln8y/7k8kWdMHrULDE9x/aalNWbCK+/vC/8gAihXlAQ=",
-    "IkY+JZt8Zh4iUvPLDGGztNncx0f4i+VyCfk8b5vY4P0=",
-    "k80C/WNNoQeupQlmMdyc60+3WQPiJYY+PRy4Ca3jew8=",
-    "aUvDZX3P3oZ53+JPe68doZCPPyTlX2I8LNmQU9dew7U="
-  ];
-  var COMIX_SIGNER_INSERT_STAGES = [
-    {
-      prefix: 10,
-      prefixBytes: "jUctkam5GFGxUA==",
-      ops: "AFQAAeA6ANIAAVkeAVRLCGwAAB0ABRIAAYZLAJ8AAIQAATE6ANEAAZEeAX1LCPgAAFEABcgAARxLADEAAGAAAbg6AK8AAWweAbJLCKQAAPEABVgAAQpLABUAAHAAAW46AKEAAWAeAfdLCFkAAEgABWwAAQFLAMIAAFYAAc86AHEAAbEeAfRLCJEAAGEABfgAAU1LABgAAMwAAWE6AJUAATgeAYpLCGwAAK4ABaQAAe1LAIgAANoAAUU6AIUAAe4eAYRLCGAAAOsABVkAAVRLALwAANEAAZI6AKMAAU8eAVRLCLEAAOgABZEAAX1LACgAAJ0AAUg6ADkAAeEeAbBLCDgAAJYABWwAAbJLAHQAAD0AAdg6AC8AAcUeAaBLCO4AAJgABWAAAfdLAIkAAIQAAew6ACQAARIeAYZLCE8AAEgABbEAAfRLAEEAAK0AAXg6AGgAAcgeARxLCOEAAKwABTgAAYpLALwAAGIAASQ6AMgAAVgeAQpLCMUAALwABe4AAYRLALAAACcAAdk6AHEAAWweAQFLCBIAAJoABU8AAVRLAGEAACQAARE6AFgAAfgeAU1LCMgAAAAABeEAAbBLAOgAAFoAAew6AJcAAaQeAe1LCFgAABYABcUAAaBLAD4A"
-    },
-    {
-      prefix: 6,
-      prefixBytes: "bcbQp+o6",
-      ops: "AYhLAThRALcAAdY6AAcAAcNLAFYAANsACM4ACIMAARZLASFRAEkAAWE6AEQAAcdLAKEAAMMACJwACBsAAXRLAQBRAPcAAew6AHUAAQRLAH8AAO4ACFgACPkAARBLAf9RAJQAATg6ALcAAVZLAAcAABMACEoACAsAAc5LAQNRAAoAASE6AEkAAeFLAEQAABcACL0ACBMAAZxLAZtRAGgAAQA6APcAAWxLAHUAANQACGMACD4AAVhLAXlRAAwAAf86AJQAAbhLALcAAIYACBsACMMAAUpLAYtRANIAAQM6AAoAAaFLAEkAADEACFgACMcAAb1LAZNRAIAAAZs6AGgAAYBLAPcAALwACGkACAQAAWNLAb5RAEQAAXk6AAwAAX9LAJQAAGgACKsACFYAARtLAUNRAFYAAYs6ANIAAYNLAAoAAHEACFUACOEAAVhLAUdRAKEAAZM6AIAAARtLAGgAAFAACOsACGwAAWlLAYRRAH8AAb46AEQAAflLAAwAAK8ACIgACLgAAatLAdZRAAcAAUM6AFYAAQtLANIAAFMACBYACKEAAVVLAWFRAEQAAUc6AKEAARNLAIAAAMsACHQACIAAAetLAexRAHUAAYQ6AH8AAT5LAEQAACkACBAACH8A"
-    },
-    {
-      prefix: 6,
-      prefixBytes: "Gi+iYUq9",
-      ops: "CHgAAKUAApgACGoAAqgAAZxtAt4AAEAAASRtAdUeCDgAAHoAAiMACH0AAvAAAURtAswAALcAAfBtAYUeCPEAAO4AAi8ACAMAAlwAAXdtAtYAAOsAAR5tAUQeCBgAAFMAAngACIAAApgAAWptAqgAAEwAAd5tAZAeCCQAAPAAAjgACF8AAiMAAX1tAvAAAJQAAcxtAWceCPAAAKAAAvEACMsAAi8AAQNtAlwAAKcAAdZtATseCB4AAGEAAhgACHYAAngAAYBtApgAALoAAahtAZweCN4AALUAAiQACNUAAjgAAV9tAiMAAK0AAfBtAUQeCMwAAEIAAvAACIUAAvEAActtAi8AANMAAVxtAXceCNYAAB4AAh4ACEQAAhgAAXZtAngAAFAAAZhtAWoeCKgAALkAAt4ACJAAAiQAAdVtAjgAAI8AASNtAX0eCPAAAGEAAswACGcAAvAAAYVtAvEAABsAAS9tAQMeCFwAAFIAAtYACDsAAh4AAURtAhgAAKYAAXhtAYAeCJgAAE8AAqgACJwAAt4AAZBtAiQAAAUAAThtAV8eCCMAAFgAAvAACEQAAswAAWdtAvAAAFUAAfFtAcseCC8AACYAAlwACHcAAtYAATttAh4AAJQAARhtAXYe"
-    },
-    {
-      prefix: 7,
-      prefixBytes: "eBRPAsbPDw==",
-      ops: "CL8AAfBLCJYAALwAAVdtCAsAAQ06Ae8eARY6ATNtCO8AAW9LCEYAAOkAAaRtCJAAAZs6AW8eATw6AcRtCO0AAWBLCOAAAAkAAXptCDAAAd86Ad8eAWY6Af5tCHAAAZdLCL8AAOwAAZZtCKAAAdc6AQseAQ06Ae9tCJYAATNLCO8AAHMAAUZtCPUAASQ6AZAeAZs6AW9tCLwAAcRLCO0AAHwAAeBtCBUAAfo6ATAeAd86Ad9tCOYAAf5LCHAAAIsAAb9tCPAAARY6AaAeAdc6AQttCI0AAe9LCJYAAC8AAe9tCG8AAcY6AfUeASQ6AZBtCBsAAW9LCLwAANgAAe1tCGAAAWA6ARUeAfo6ATBtCF8AAd9LCOYAAOIAAXBtCJcAAT86AfAeARY6AaBtCFcAAQtLCI0AAPMAAZZtCDMAAW86AW8eAcY6AfVtCKQAAZBLCBsAAHMAAbxtCMQAAW06AWAeAWA6ARVtCHoAATBLCF8AAMMAAeZtCP4AAfA6AZceAT86AfBtCJYAAaBLCFcAABcAAY1tCO8AARY6ATMeAW86AW9tCEYAAfVLCKQAAIwAARttCG8AATw6AcQeAWBtCOAAARVLCHoAACwAAV9tCN8AAWY6Af4eAfA6AZdt"
-    },
-    {
-      prefix: 9,
-      prefixBytes: "YUCisHAu3f3E",
-      ops: "AJkAAPMAAXseAbBtAVQeCIgAAU46AKYAAMkAAMoAAHMAAKsAAXAeAS1tAdseCFkAAYk6AEEAAJkAAGkAAOgAAIgAAfoeARxtAVQeCLAAAa86AJ8AAC0AAAgAAJYAAIwAAbweASNtAXseCLAAAdQ6AJQAAOsAAKYAAMkAAAYAAVYeAXttAXAeCC0AAVs6AEUAACwAAEEAAJkAAKUAAc0eAVhtAfoeCBwAAdQ6AKwAAAoAAJ8AAC0AAMQAAbMeAVxtAbweCCMAAfs6AKwAAHEAAJQAAOsAAGoAAeweAdZtAVYeCHsAAfA6ADEAAP4AAEUAACwAAI0AAbweAXVtAc0eCFgAAXo6AAAAAHEAAKwAAAoAAFMAAQgeARRtAbMeCFwAATw6AD8AAF4AAKwAAHEAAFgAAc4eAbptAeweCNYAAdY6AGcAAFUAADEAAP4AAIkAAQkeAV1tAbweCHUAAU06AEQAAN8AAAAAAHEAAGAAAS8eAYNtAQgeCBQAATM6AEAAAJkAAD8AAF4AAGAAAVQeAYhtAc4eCLoAAWw6AMoAAHMAAGcAAFUAAP0AAdseAVltAQkeCF0AATw6AGkAAOgAAEQAAN8AAMwAAVQeAbBtAS8eCIMAAYg6AAgAAJYAAEAA"
-    }
-  ];
-  var decodedComixSignerStages = null;
-  // Legacy tes1em envelope crypto is retained for encrypted responses.
-  var COMIX_HASH_KEYS = [
-    "22D604qPJ3iZyib4WaXX4bhRjo4eLGzPS8NI/5kBg5o=",
-    "1sp9w8c67MpO",
-    "Q9TdwuMw/MxVqi3O5uAg5xRarTM3LqwWMYOMGE/+1CA=",
-    "AXESAx7UvxKF55ykpvLcnvj2T7+nlXxWhq0XXJrzXJY=",
-    "qLHSPpfPyw==",
-    "+QKAlsdnzXGBRSCDX8DHsF0YFZMWRzrDmY0GpLYJJKY=",
-    "njh2h71NUbtQaemzhwD0bCgKFyQc928JMEES3DzVPRA=",
-    "FdvbFojh",
-    "nKvB9ym8/F1C9wFG78p8DQJ6LyzrQ//hQTs5MpOJr5I=",
-    "jxi8Q+dayEjqxPL51wfhKjE6QDwcsoueGNu0ijoNw64=",
-    "+UTnB4G+MtwH",
-    "QMSq6NACRC5GKB5OiU5fHJjQ9KTTDezj9d0cthqNiRs=",
-    "X46a7RgXUAAEwht+w1UAiuH2OmPGdjabVUTIZoa3iaY=",
-    "iOAFX0i0iA==",
-    "mmlfRKf+YlUdIQzFKeWLP/Xt6xTAPZZQaR3AHp+5vdY="
+  var GROUP_MATCH_OPTIONS = [
+    { id: GROUP_MATCH_EXACT, label: "Exact Group Name" },
+    { id: GROUP_MATCH_CONTAINS, label: "Group Name Contains Text" }
   ];
   var FALLBACK_FILTER_OPTIONS = {
     genres: [
@@ -171,6 +146,7 @@
       { id: "87265", label: "Ecchi" },
       { id: "12", label: "Fantasy" },
       { id: "13", label: "Girls Love" },
+      { id: "40", label: "Harem" },
       { id: "87266", label: "Hentai" },
       { id: "14", label: "Historical" },
       { id: "15", label: "Horror" },
@@ -210,6 +186,7 @@
       { id: "93171", label: "Web Comic" }
     ],
     themes: [],
+    years: [],
     statuses: [
       { id: "releasing", label: "Releasing" },
       { id: "finished", label: "Finished" },
@@ -225,17 +202,25 @@
     ],
     sorts: [
       { id: "relevance:desc", label: "Best Match" },
+      { id: "chapter_updated_at:asc", label: "Update Date (Oldest)" },
       { id: "chapter_updated_at:desc", label: "Latest Updates" },
+      { id: "created_at:asc", label: "Created Date (Oldest)" },
       { id: "created_at:desc", label: "Recently Added" },
       { id: "title:asc", label: "Title A-Z" },
       { id: "title:desc", label: "Title Z-A" },
       { id: "year:desc", label: "Year (Newest)" },
       { id: "year:asc", label: "Year (Oldest)" },
+      { id: "score:asc", label: "Lowest Rated" },
       { id: "score:desc", label: "Highest Rated" },
+      { id: "views_7d:asc", label: "Least Viewed - 7 Days" },
       { id: "views_7d:desc", label: "Most Viewed - 7 Days" },
+      { id: "views_30d:asc", label: "Least Viewed - 30 Days" },
       { id: "views_30d:desc", label: "Most Viewed - 30 Days" },
+      { id: "views_90d:asc", label: "Least Viewed - 90 Days" },
       { id: "views_90d:desc", label: "Most Viewed - 90 Days" },
+      { id: "views_total:asc", label: "Least Viewed - All Time" },
       { id: "views_total:desc", label: "Most Viewed - All Time" },
+      { id: "follows_total:asc", label: "Least Followed" },
       { id: "follows_total:desc", label: "Most Followed" }
     ]
   };
@@ -243,7 +228,7 @@
   // Source Info
 
   var ComixToInfo = {
-    version: "1.0.9",
+    version: "1.1.0",
     name: "ComixTo",
     description: "Extension that pulls series from " + DOMAIN,
     author: "real",
@@ -258,24 +243,64 @@
 
   function ComixTo() {
     this.cachedFilterData = null;
+    this.cachedFilterDataPromise = null;
+    this.cachedFilterDataExpiresAt = 0;
+    this.filterCacheGeneration = 0;
+    this.cachedTagSearchIds = {};
+    this.cachedTagSearchOrder = [];
     this.cachedChapterShareUrls = {};
+    this.cachedChapterShareUrlOrder = [];
+    this.cachedTitleData = {};
+    this.cachedTitleDataOrder = [];
+    this.cachedUserAgentPromise = null;
+    this.cachedHomeHtml = null;
+    this.cachedHomeHtmlPromise = null;
+    this.cachedHomeHtmlExpiresAt = 0;
+    this.homeHtmlGeneration = 0;
+    this.cachedLiveProtocol = null;
+    this.cachedLiveProtocolPromise = null;
+    this.liveProtocolGeneration = 0;
     this.stateManager = App.createSourceStateManager();
     this.requestManager = App.createRequestManager({
       requestsPerSecond: 4,
       requestTimeout: 20000,
       interceptor: {
         interceptRequest: async function(request) {
-          request.headers = Object.assign({}, request.headers || {}, {
-            referer: DOMAIN + "/",
-            origin: DOMAIN,
-            accept: "application/json, text/plain, */*",
-            "x-requested-with": "XMLHttpRequest",
-            "user-agent": await this.requestManager.getDefaultUserAgent()
-          });
+          if (!this.cachedUserAgentPromise) {
+            var source = this;
+            this.cachedUserAgentPromise = Promise.resolve(this.requestManager.getDefaultUserAgent()).catch(function(error) {
+              source.cachedUserAgentPromise = null;
+              throw error;
+            });
+          }
+
+          if (isSignerProtectedApiUrl(request.url)) {
+            request.url = await this.signLiveApiUrl(request.url);
+          }
+
+          var headers = Object.assign({}, request.headers || {});
+          headers["user-agent"] = await this.cachedUserAgentPromise;
+
+          if (isImageRequestUrl(request.url)) {
+            removeHeaderIgnoreCase(headers, "referer");
+            removeHeaderIgnoreCase(headers, "origin");
+            removeHeaderIgnoreCase(headers, "x-requested-with");
+            headers.accept = "image/avif,image/webp,image/apng,image/*,*/*;q=0.8";
+          } else {
+            headers.referer = DOMAIN + "/";
+            headers.origin = DOMAIN;
+            headers.accept = "application/json, text/plain, */*";
+            headers["x-requested-with"] = "XMLHttpRequest";
+          }
+
+          request.headers = headers;
           return request;
         }.bind(this),
         interceptResponse: async function(response) {
-          return response;
+          if (isCloudflareMitigatedResponse(response)) {
+            throw new Error("Cloudflare Bypass Required");
+          }
+          return processComixImageResponse(response);
         }
       }
     });
@@ -299,33 +324,66 @@
   };
 
   ComixTo.prototype.getChapterShareUrl = function(seriesId, chapterId) {
-    var cachedUrl = this.cachedChapterShareUrls && this.cachedChapterShareUrls[String(chapterId)];
+    var cachedUrl = getCachedChapterShareUrl(this, chapterId);
     return cleanText(cachedUrl || "") || this.getMangaShareUrl(seriesId);
   };
 
   ComixTo.prototype.getHomePageSections = async function(sectionCallback) {
-    var homeFilters = await getHomeFilterParams(this.stateManager);
-    var trendingSectionDays = await getTrendingDays(this.stateManager);
-    var mostFollowedSectionDays = await getMostFollowedDays(this.stateManager);
-    var results = await Promise.all([
-      this.getTopSectionItems("trending", 1, homeFilters, trendingSectionDays),
-      this.getTopSectionItems("follows", 1, homeFilters, mostFollowedSectionDays),
-      this.getLatestSectionItems(1, homeFilters),
-      this.getNewSectionItems(1, homeFilters),
-      this.getCompleteSectionItems(1, homeFilters)
+    var settings = await Promise.all([
+      getHomeFilterParams(this.stateManager),
+      getTrendingDays(this.stateManager),
+      getMostFollowedDays(this.stateManager),
+      getLatestUpdatesView(this.stateManager),
+      getExtraHomeSections(this.stateManager)
     ]);
+    var homeFilters = settings[0];
+    var trendingSectionDays = settings[1];
+    var mostFollowedSectionDays = settings[2];
+    var latestView = settings[3];
+    var extraSections = settings[4];
+    var source = this;
+    var tasks = [];
 
-    [
-      createHomeSection(SECTION_ID_FEATURED, "Trending", "featured", results[0]),
-      createHomeSection(SECTION_ID_FOLLOWS, "Most Followed", "singleRowLarge", results[1]),
-      createHomeSection(SECTION_ID_LATEST, "Latest Updates", "singleRowNormal", results[2]),
-      createHomeSection(SECTION_ID_NEW, "Recently Added", "singleRowNormal", results[3]),
-      createHomeSection(SECTION_ID_COMPLETE, "Complete Series", "singleRowNormal", results[4])
-    ].forEach(function(section) {
-      if (Array.isArray(section.items) && section.items.length > 0) {
-        sectionCallback(section);
-      }
-    });
+    if (isDefaultHomePayloadCompatible(homeFilters, trendingSectionDays, mostFollowedSectionDays, latestView)) {
+      var embeddedPromise = this.getEmbeddedHomeSectionItems().catch(function(error) {
+        if (isCloudflareBypassError(error)) {
+          throw error;
+        }
+        return {};
+      });
+
+      tasks.push(streamHomeSection(sectionCallback, SECTION_ID_FEATURED, "Most Recent Popular", "featured", embeddedPromise.then(function(embedded) {
+        return embedded.trending || source.getTopSectionItems("trending", 1, homeFilters, trendingSectionDays);
+      })));
+      tasks.push(streamHomeSection(sectionCallback, SECTION_ID_FOLLOWS, "Most Follows · New Comics", "singleRowLarge", embeddedPromise.then(function(embedded) {
+        return embedded.follows || source.getTopSectionItems("follows", 1, homeFilters, mostFollowedSectionDays);
+      })));
+      tasks.push(streamHomeSection(sectionCallback, SECTION_ID_LATEST, "Latest Updates", "singleRowNormal", embeddedPromise.then(function(embedded) {
+        return embedded.latest || source.getLatestSectionItems(1, homeFilters, latestView);
+      })));
+      tasks.push(streamHomeSection(sectionCallback, SECTION_ID_NEW, "Recently Added", "singleRowNormal", embeddedPromise.then(function(embedded) {
+        return embedded.recent || source.getNewSectionItems(1, homeFilters);
+      })));
+    } else {
+      tasks.push(streamHomeSection(sectionCallback, SECTION_ID_FEATURED, "Most Recent Popular", "featured", this.getTopSectionItems("trending", 1, homeFilters, trendingSectionDays)));
+      tasks.push(streamHomeSection(sectionCallback, SECTION_ID_FOLLOWS, "Most Follows · New Comics", "singleRowLarge", this.getTopSectionItems("follows", 1, homeFilters, mostFollowedSectionDays)));
+      tasks.push(streamHomeSection(sectionCallback, SECTION_ID_LATEST, "Latest Updates", "singleRowNormal", this.getLatestSectionItems(1, homeFilters, latestView)));
+      tasks.push(streamHomeSection(sectionCallback, SECTION_ID_NEW, "Recently Added", "singleRowNormal", this.getNewSectionItems(1, homeFilters)));
+    }
+
+    tasks.push(streamHomeSection(sectionCallback, SECTION_ID_FOLLOWS_ALL, "Most Followed", "singleRowLarge", this.getMostFollowedAllSectionItems(1, homeFilters)));
+    tasks.push(streamHomeSection(sectionCallback, SECTION_ID_COMPLETE, "Complete Series", "singleRowNormal", this.getCompleteSectionItems(1, homeFilters)));
+    if (extraSections.indexOf(SECTION_ID_TRENDING_MANGA) >= 0) {
+      tasks.push(streamHomeSection(sectionCallback, SECTION_ID_TRENDING_MANGA, "Trending Manga", "singleRowNormal", this.getTrendingMangaSectionItems(1, homeFilters)));
+    }
+    if (extraSections.indexOf(SECTION_ID_TRENDING_WEBTOONS) >= 0) {
+      tasks.push(streamHomeSection(sectionCallback, SECTION_ID_TRENDING_WEBTOONS, "Trending WebToons", "singleRowNormal", this.getTrendingWebtoonSectionItems(1, homeFilters)));
+    }
+
+    var outcomes = await Promise.all(tasks);
+    if (!outcomes.some(function(value) { return value === true; })) {
+      throw new Error("ComixTo could not load any homepage sections.");
+    }
   };
 
   ComixTo.prototype.getViewMoreItems = async function(homepageSectionId, metadata) {
@@ -339,31 +397,63 @@
       return this.getNewSectionItems(page);
     }
 
+    if (homepageSectionId === SECTION_ID_FOLLOWS_ALL) {
+      return this.getMostFollowedAllSectionItems(page);
+    }
+
+    if (homepageSectionId === SECTION_ID_TRENDING_MANGA) {
+      return this.getTrendingMangaSectionItems(page);
+    }
+
+    if (homepageSectionId === SECTION_ID_TRENDING_WEBTOONS) {
+      return this.getTrendingWebtoonSectionItems(page);
+    }
+
     if (homepageSectionId === SECTION_ID_COMPLETE) {
       return this.getCompleteSectionItems(page);
     }
 
-    return App.createPagedResults({
-      results: []
-    });
+    return createEmptyPagedResults();
   };
 
   ComixTo.prototype.getCloudflareBypassRequestAsync = async function() {
     return App.createRequest({
       url: DOMAIN,
-      method: "GET"
+      method: "GET",
+      headers: {
+        "Referer": DOMAIN + "/",
+        "User-Agent": await this.requestManager.getDefaultUserAgent()
+      }
     });
   };
 
   ComixTo.prototype.getSourceMenu = async function() {
     var stateManager = this.stateManager;
+    var source = this;
     return App.createDUISection({
       id: "main",
       header: "Source Settings",
       isHidden: false,
-      footer: "Chapter group matching uses comma-separated exact group names or numeric group IDs.",
+      footer: "Chapter group matching uses comma-separated group names or numeric group IDs.",
       rows: async function() {
-        return [
+        var filterData;
+        try {
+          filterData = await source.getFilterData();
+        } catch (error) {
+          if (isCloudflareBypassError(error)) {
+            throw error;
+          }
+          filterData = FALLBACK_FILTER_OPTIONS;
+        }
+        var savedTerms = await Promise.all([
+          getHiddenTerms(stateManager),
+          getRequiredTerms(stateManager)
+        ]);
+        var hiddenTermOptions = appendSavedTermOptions(
+          buildHiddenTermOptions(filterData),
+          savedTerms[0].concat(savedTerms[1])
+        );
+        var rows = [
           createSingleSelectSetting(stateManager, {
             id: STATE_CONTENT_RATING,
             label: "Content Rating",
@@ -404,12 +494,48 @@
             options: HOME_TYPE_OPTIONS,
             getValue: getHomeTypes
           }),
+          createOptionalMultiSelectSetting(stateManager, {
+            id: STATE_EXTRA_HOME_SECTIONS,
+            label: "Extra Home Sections",
+            options: EXTRA_HOME_SECTION_OPTIONS,
+            getValue: getExtraHomeSections
+          }),
+          createOptionalMultiSelectSetting(stateManager, {
+            id: STATE_HIDDEN_TERMS,
+            label: "Global Hidden Terms",
+            options: hiddenTermOptions,
+            getValue: async function(manager) {
+              return normalizeOptionalMultiOptionValues(await getHiddenTerms(manager), hiddenTermOptions);
+            }
+          }),
+          createOptionalMultiSelectSetting(stateManager, {
+            id: STATE_REQUIRED_TERMS,
+            label: "Global Required Terms",
+            options: hiddenTermOptions,
+            getValue: async function(manager) {
+              return normalizeOptionalMultiOptionValues(await getRequiredTerms(manager), hiddenTermOptions);
+            }
+          }),
+          createSingleSelectSetting(stateManager, {
+            id: STATE_REQUIRED_TERMS_MODE,
+            label: "Required Terms Match",
+            options: REQUIRED_TERM_MODE_OPTIONS,
+            fallback: "and",
+            getValue: getRequiredTermsMode
+          }),
           createSingleSelectSetting(stateManager, {
             id: STATE_CHAPTER_GROUP_MODE,
             label: "Chapter Group Handling",
             options: GROUP_MODE_OPTIONS,
             fallback: GROUP_MODE_ALL,
             getValue: getChapterGroupMode
+          }),
+          createSingleSelectSetting(stateManager, {
+            id: STATE_CHAPTER_GROUP_MATCH,
+            label: "Chapter Group Name Match",
+            options: GROUP_MATCH_OPTIONS,
+            fallback: GROUP_MATCH_EXACT,
+            getValue: getChapterGroupMatchMode
           }),
           App.createDUIInputField({
             id: STATE_CHAPTER_GROUP_FILTER,
@@ -424,6 +550,26 @@
             })
           })
         ];
+
+        if (typeof App.createDUIButton === "function") {
+          rows.push(App.createDUIButton({
+            id: "refresh_filter_catalog",
+            label: "Refresh Filter Catalog",
+            onTap: async function() {
+              await source.refreshFilterData();
+            }
+          }));
+          rows.push(App.createDUIButton({
+            id: "reset_settings",
+            label: "Reset ComixTo Settings",
+            onTap: async function() {
+              await resetSourceSettings(stateManager);
+              invalidateFilterCatalogCache(source);
+            }
+          }));
+        }
+
+        return rows;
       }
     });
   };
@@ -439,14 +585,32 @@
   };
 
   ComixTo.prototype.getSearchFields = async function() {
-    return [createMinimumChaptersSearchField()];
+    return [
+      createSearchField(SEARCH_FIELD_AUTHOR, "Author", "comma-separated names"),
+      createSearchField(SEARCH_FIELD_ARTIST, "Artist", "comma-separated names"),
+      createSearchField(SEARCH_FIELD_TAGS, "Tags", "comma-separated tags"),
+      createSearchField(SEARCH_FIELD_MIN_CHAPTERS, "Minimum Chapters", "e.g. 10"),
+      createSearchField(SEARCH_FIELD_YEAR_FROM, "Release Year From", "e.g. 2015"),
+      createSearchField(SEARCH_FIELD_YEAR_TO, "Release Year To", "e.g. 2026")
+    ];
   };
 
   ComixTo.prototype.getMangaDetails = async function(seriesId) {
-    var details = extractApiResult(
-      await this.fetchJson(buildApiUrl("/manga/" + encodePathSegment(seriesId))),
-      "/manga/" + seriesId
-    );
+    var details;
+
+    try {
+      details = await this.fetchMangaDetailsFromHtml(seriesId);
+    } catch (error) {
+      if (isCloudflareBypassError(error)) {
+        throw error;
+      }
+      details = extractApiResult(
+        await this.fetchJson(buildApiUrl("/manga/" + encodePathSegment(seriesId), {
+          includes: ["author", "artist"]
+        })),
+        "/manga/" + seriesId
+      );
+    }
 
     return App.createSourceManga({
       id: String(details.hid || seriesId),
@@ -467,31 +631,87 @@
   ComixTo.prototype.getChapters = async function(seriesId) {
     var path = "/manga/" + encodePathSegment(seriesId) + "/chapters";
     var source = this;
-    var firstPage = extractApiResult(await this.fetchJson(buildSignedApiUrl(path, {
-      page: 1,
-      limit: CHAPTERS_PAGE_SIZE,
-      order: { number: "desc" }
-    })), path);
-    var pages = [firstPage];
-    var totalPages = toPositiveInteger(firstPage && firstPage.meta && firstPage.meta.lastPage, 1);
-    var pendingPages = [];
-    var chapters;
     var groupSettings = await getChapterGroupSettings(this.stateManager);
+    var chapterParams = createChapterListParams(1, groupSettings);
+    var pages = [];
+    var firstPage;
+    var totalPages;
+    var chapters;
     var fetchedAt;
     var duplicateDateFallbacks;
+    var apiError;
+    var seenChapterPageItems = {};
+    var followupBatchSize;
+    var implicitChapterPageCap = false;
+    var chapterPagingComplete = true;
 
-    for (var page = 2; page <= totalPages; page += 1) {
-      pendingPages.push(this.fetchJson(buildSignedApiUrl(path, {
-        page: page,
-        limit: CHAPTERS_PAGE_SIZE,
-        order: { number: "desc" }
-      })));
-    }
+    try {
+      firstPage = extractApiResult(await this.fetchJson(buildSignedApiUrl(path, chapterParams)), path);
+      pages.push(firstPage);
+      rememberChapterPageItems(firstPage, seenChapterPageItems);
+      totalPages = getChapterPageFetchLimit(firstPage);
+      var hasExplicitPageCount = hasExplicitChapterLastPage(firstPage);
+      followupBatchSize = hasExplicitPageCount ? CHAPTER_PAGE_BATCH_SIZE : 1;
+      implicitChapterPageCap = !hasExplicitPageCount && totalPages === MAX_CHAPTER_PAGES;
+      chapterPagingComplete = !implicitChapterPageCap;
 
-    if (pendingPages.length > 0) {
-      (await Promise.all(pendingPages)).forEach(function(payload) {
-        pages.push(extractApiResult(payload, path));
+      for (var batchStart = 2; batchStart <= totalPages; batchStart += followupBatchSize) {
+        var pendingPages = [];
+        var batchEnd = Math.min(totalPages, batchStart + followupBatchSize - 1);
+
+        for (var page = batchStart; page <= batchEnd; page += 1) {
+          (function(pageNumber) {
+            pendingPages.push(source.fetchJson(buildSignedApiUrl(path, createChapterListParams(pageNumber, groupSettings))).then(function(payload) {
+              return {
+                page: pageNumber,
+                result: extractApiResult(payload, path)
+              };
+            }));
+          })(page);
+        }
+
+        var batchResults = await Promise.all(pendingPages);
+        var stopPaging = false;
+        for (var resultIndex = 0; resultIndex < batchResults.length; resultIndex += 1) {
+          var pageResult = batchResults[resultIndex];
+          var pageItems = Array.isArray(pageResult.result && pageResult.result.items) ? pageResult.result.items : [];
+          var newItemCount = rememberChapterPageItems(pageResult.result, seenChapterPageItems);
+
+          if (pageItems.length > 0 && newItemCount === 0) {
+            throw new Error("ComixTo repeated a chapter page while pagination still appeared active. Refusing to return a partial chapter list.");
+          }
+
+          pages.push(pageResult.result);
+          if (shouldStopChapterPaging(pageResult.result, pageResult.page)) {
+            chapterPagingComplete = true;
+            stopPaging = true;
+            break;
+          }
+        }
+
+        if (stopPaging) {
+          break;
+        }
+      }
+
+      if (implicitChapterPageCap && !chapterPagingComplete) {
+        throw new Error("ComixTo chapter pagination reached the safety limit of " + MAX_CHAPTER_PAGES + " pages while the API still reported more chapters. Refusing to return a truncated chapter list.");
+      }
+    } catch (error) {
+      apiError = error;
+      if (isCloudflareBypassError(apiError)) {
+        throw apiError;
+      }
+      var htmlFallback = await this.fetchCompleteChaptersFromHtml(seriesId).catch(function(fallbackError) {
+        if (isCloudflareBypassError(fallbackError)) {
+          throw fallbackError;
+        }
+        return null;
       });
+      if (!htmlFallback) {
+        throw apiError;
+      }
+      pages = [htmlFallback];
     }
 
     chapters = dedupeById(flatten(pages.map(function(pageData) {
@@ -532,7 +752,9 @@
         chapterData.group = groupName;
       }
 
-      cacheChapterShareUrl(source, chapterId, chapter.url);
+      if (index < CHAPTER_SHARE_URL_CACHE_SIZE) {
+        cacheChapterShareUrl(source, chapterId, chapter.url);
+      }
 
       return App.createChapter(chapterData);
     });
@@ -546,7 +768,23 @@
 
   ComixTo.prototype.getChapterDetails = async function(seriesId, chapterId) {
     var path = "/chapters/" + encodePathSegment(chapterId);
-    var chapterData = extractApiResult(await this.fetchJson(buildSignedApiUrl(path)), path);
+    var chapterData;
+    var apiError;
+
+    chapterData = await this.fetchChapterDetailsFromHtml(chapterId).catch(function(error) {
+      if (isCloudflareBypassError(error)) {
+        throw error;
+      }
+      return null;
+    });
+    if (!chapterData) {
+      try {
+        chapterData = extractApiResult(await this.fetchJson(buildSignedApiUrl(path)), path);
+      } catch (error) {
+        apiError = error;
+        throw apiError;
+      }
+    }
     var pages = normalizeChapterPages(chapterData && chapterData.pages);
 
     if (pages.length === 0) {
@@ -564,17 +802,57 @@
 
   ComixTo.prototype.getSearchResults = async function(query, metadata) {
     var page = toPositiveInteger(metadata && metadata.page, 1);
-    var title = cleanText(query && query.title || "");
+    var title = normalizeSearchText(query && query.title || "");
     var filters = extractSearchFilters(query);
+    var resolvedSearchInputs = await Promise.all([
+      this.resolveTagIdsForNames("author", filters.authorNames, "Author"),
+      this.resolveTagIdsForNames("artist", filters.artistNames, "Artist"),
+      this.resolveTagIdsForNames("tag", filters.tagNames, "Tag"),
+      getHiddenTerms(this.stateManager),
+      getRequiredTerms(this.stateManager),
+      getRequiredTermsMode(this.stateManager),
+      getContentRating(this.stateManager)
+    ]);
+    var authorIds = resolvedSearchInputs[0];
+    var artistIds = resolvedSearchInputs[1];
+    var tagIds = resolvedSearchInputs[2];
+    var hiddenTermIds = getHiddenTermIds(resolvedSearchInputs[3]);
+    var requiredTermIds = getHiddenTermIds(resolvedSearchInputs[4]);
+    var hasLocalIncludedTerms = filters.genresIn.length > 0 || tagIds.length > 0;
+    hiddenTermIds = hiddenTermIds.filter(function(id) {
+      return requiredTermIds.indexOf(id) < 0;
+    });
     var sort = parseSortOption(filters.sort || (title.length > 0 ? SEARCH_DEFAULT_SORT : DEFAULT_SORT));
     var params = {
       page: page,
       limit: SEARCH_PAGE_SIZE,
-      content_rating: await getContentRating(this.stateManager),
+      content_rating: getContentRatingsUpTo(resolvedSearchInputs[6]),
       order: sort
     };
     var result;
     var items;
+
+    authorIds.forEach(function(id) {
+      pushUnique(filters.authors, id);
+    });
+    artistIds.forEach(function(id) {
+      pushUnique(filters.artists, id);
+    });
+    tagIds.forEach(function(id) {
+      pushUnique(filters.genresIn, id);
+    });
+    hiddenTermIds.forEach(function(id) {
+      pushUnique(filters.genresEx, id);
+    });
+    requiredTermIds.forEach(function(id) {
+      pushUnique(filters.genresIn, id);
+    });
+    // Comix exposes one shared genres_mode for all included terms. Preserve an
+    // explicit/query-local mode when local includes exist; otherwise the global
+    // Required Terms setting controls the combined required-term match mode.
+    if (requiredTermIds.length > 0 && !hasLocalIncludedTerms) {
+      filters.genresMode = resolvedSearchInputs[5];
+    }
 
     if (title.length > 0) {
       params.keyword = title;
@@ -604,7 +882,7 @@
       params.genres_ex = filters.genresEx;
     }
 
-    if (filters.genresIn.length > 0 || filters.genresEx.length > 0) {
+    if (filters.genresIn.length > 0) {
       params.genres_mode = filters.genresMode;
     }
 
@@ -614,6 +892,14 @@
 
     if (toPositiveInteger(filters.minChapters, 0) > 0) {
       params.min_chap = filters.minChapters;
+    }
+
+    if (toPositiveInteger(filters.yearFrom, 0) > 0) {
+      params.year_from = filters.yearFrom;
+    }
+
+    if (toPositiveInteger(filters.yearTo, 0) > 0) {
+      params.year_to = filters.yearTo;
     }
 
     result = extractApiResult(await this.fetchJson(buildApiUrl("/manga", params)), "/manga");
@@ -634,7 +920,7 @@
       type: type,
       days: days,
       page: page,
-      limit: HOME_PAGE_SIZE
+      limit: TOP_SECTION_PAGE_SIZE
     }, filters))), "/manga/top");
     var items = Array.isArray(result && result.items) ? result.items : Array.isArray(result) ? result : [];
 
@@ -644,8 +930,8 @@
     });
   };
 
-  ComixTo.prototype.getLatestSectionItems = async function(page, homeFilters) {
-    var latestView = await getLatestUpdatesView(this.stateManager);
+  ComixTo.prototype.getLatestSectionItems = async function(page, homeFilters, latestView) {
+    latestView = latestView || (await getLatestUpdatesView(this.stateManager));
     var params = {
       order: { chapter_updated_at: "desc" }
     };
@@ -671,13 +957,35 @@
     }, homeFilters);
   };
 
+  ComixTo.prototype.getMostFollowedAllSectionItems = async function(page, homeFilters) {
+    return this.getSeriesListSectionItems(page, {
+      order: { follows_total: "desc" }
+    }, homeFilters);
+  };
+
+  ComixTo.prototype.getTrendingMangaSectionItems = async function(page, homeFilters) {
+    return this.getSeriesListSectionItems(page, {
+      types: ["manga"],
+      order: { views_30d: "desc" }
+    }, homeFilters);
+  };
+
+  ComixTo.prototype.getTrendingWebtoonSectionItems = async function(page, homeFilters) {
+    return this.getSeriesListSectionItems(page, {
+      types: ["manhwa", "manhua"],
+      order: { views_30d: "desc" }
+    }, homeFilters);
+  };
+
   ComixTo.prototype.getSeriesListSectionItems = async function(page, baseParams, homeFilters) {
     var filters = homeFilters || (await getHomeFilterParams(this.stateManager));
     var params = Object.assign({
       page: page,
       limit: HOME_PAGE_SIZE
     }, filters, baseParams || {});
-    var result = extractApiResult(await this.fetchJson(buildApiUrl("/manga", params)), "/manga");
+    var result;
+
+    result = extractApiResult(await this.fetchJson(buildApiUrl("/manga", params)), "/manga");
     var items = Array.isArray(result && result.items) ? result.items : [];
 
     return App.createPagedResults({
@@ -686,33 +994,277 @@
     });
   };
 
+  ComixTo.prototype.getTitleInitialData = async function(seriesId) {
+    var key = cleanText(seriesId || "");
+    var cached = this.cachedTitleData[key];
+    var source = this;
+
+    if (cached && cached.data && cached.expiresAt > Date.now()) {
+      return cached.data;
+    }
+    if (cached && cached.promise) {
+      return cached.promise;
+    }
+
+    var pending = this.fetchText(this.getMangaShareUrl(seriesId)).then(function(html) {
+      var data = parseInitialData(html);
+      if (!isObject(data) || !isObject(data.queries)) {
+        throw new Error("ComixTo title page did not expose initial-data queries.");
+      }
+      cacheTitleInitialData(source, key, data);
+      return data;
+    }).catch(function(error) {
+      delete source.cachedTitleData[key];
+      throw error;
+    });
+
+    this.cachedTitleData[key] = { promise: pending };
+    return pending;
+  };
+
+  function cacheTitleInitialData(source, key, data) {
+    var existingIndex = source.cachedTitleDataOrder.indexOf(key);
+
+    if (existingIndex >= 0) {
+      source.cachedTitleDataOrder.splice(existingIndex, 1);
+    }
+    source.cachedTitleData[key] = {
+      data: data,
+      expiresAt: Date.now() + TITLE_DATA_CACHE_TTL_MS
+    };
+    source.cachedTitleDataOrder.push(key);
+
+    while (source.cachedTitleDataOrder.length > TITLE_DATA_CACHE_SIZE) {
+      delete source.cachedTitleData[source.cachedTitleDataOrder.shift()];
+    }
+  }
+
+  ComixTo.prototype.fetchMangaDetailsFromHtml = async function(seriesId) {
+    var initialData = await this.getTitleInitialData(seriesId);
+    var queries = isObject(initialData && initialData.queries) ? initialData.queries : {};
+    var detail = findInitialQueryValueByFamily(queries, "manga", "detail") || findInitialQueryValue(queries, ['"detail"']);
+
+    detail = isObject(detail && detail.result) ? detail.result : detail;
+    if (!isObject(detail) || cleanText(detail.title || "").length === 0) {
+      detail = findMangaDetailInQueries(queries, seriesId);
+    }
+    if (!isObject(detail) || cleanText(detail.title || "").length === 0) {
+      throw new Error("ComixTo title page did not contain readable manga details for " + seriesId + ".");
+    }
+
+    return detail;
+  };
+
+  ComixTo.prototype.fetchCompleteChaptersFromHtml = async function(seriesId) {
+    var initialData = await this.getTitleInitialData(seriesId);
+    var queries = isObject(initialData && initialData.queries) ? initialData.queries : {};
+    var result = findCompleteChapterListInQueries(queries);
+
+    if (!result) {
+      throw new Error("ComixTo title HTML did not contain a complete embedded chapter list.");
+    }
+
+    return result;
+  };
+
+  ComixTo.prototype.fetchChapterDetailsFromHtml = async function(chapterId) {
+    var chapterUrl = getCachedChapterShareUrl(this, chapterId);
+    if (chapterUrl.length === 0) {
+      throw new Error("ComixTo does not have a cached chapter URL for the HTML page fallback.");
+    }
+
+    var html = await this.fetchText(chapterUrl);
+    var initialData = parseInitialData(html);
+    var queries = isObject(initialData && initialData.queries) ? initialData.queries : {};
+    var result = findChapterPagesInQueries(queries);
+
+    if (!result) {
+      throw new Error("ComixTo chapter HTML did not contain an embedded page payload.");
+    }
+
+    return result;
+  };
+
+  ComixTo.prototype.getEmbeddedHomeSectionItems = async function() {
+    // Discover should reflect the current homepage on every refresh. Keep a copy
+    // for signer bootstrap, but do not serve display sections from the 5-minute
+    // signer bootstrap cache.
+    var generation = this.homeHtmlGeneration;
+    var html = await this.fetchText(DOMAIN + "/");
+    if (generation === this.homeHtmlGeneration) {
+      this.cachedHomeHtml = html;
+      this.cachedHomeHtmlExpiresAt = Date.now() + HOME_HTML_CACHE_TTL_MS;
+    }
+    var initialData = parseInitialData(html);
+    var queries = isObject(initialData && initialData.queries) ? initialData.queries : {};
+    var trending = findInitialQueryValue(queries, ['"manga","top"', '"trending"']);
+    var follows = findInitialQueryValue(queries, ['"manga","top"', '"follows"']);
+    var latest = findInitialQueryValue(queries, ['"scope":"hot"', '"chapter_updated_at":"desc"']);
+    var recent = findInitialQueryValue(queries, ['"manga","list"', '"created_at":"desc"']);
+
+    if (trending === void 0 || follows === void 0 || latest === void 0 || recent === void 0) {
+      throw new Error("ComixTo homepage initial-data no longer contains the expected manga sections.");
+    }
+
+    return {
+      trending: createEmbeddedHomePagedResults(trending, TOP_SECTION_PAGE_SIZE),
+      follows: createEmbeddedHomePagedResults(follows, TOP_SECTION_PAGE_SIZE),
+      latest: createEmbeddedHomePagedResults(latest, HOME_PAGE_SIZE),
+      recent: createEmbeddedHomePagedResults(recent, HOME_PAGE_SIZE)
+    };
+  };
+
   ComixTo.prototype.getFilterData = async function() {
-    if (this.cachedFilterData) {
+    if (this.cachedFilterData && this.cachedFilterDataExpiresAt > Date.now()) {
       return this.cachedFilterData;
     }
 
-    try {
-      this.cachedFilterData = mergeFilterOptions(FALLBACK_FILTER_OPTIONS, await this.fetchBrowseOptions());
-    } catch (error) {
-      this.cachedFilterData = FALLBACK_FILTER_OPTIONS;
+    if (this.cachedFilterDataPromise) {
+      var pendingCache = await this.cachedFilterDataPromise;
+      return pendingCache.data;
     }
 
-    return this.cachedFilterData;
-  };
+    var source = this;
+    var generation = this.filterCacheGeneration;
+    var localPromise = (async function() {
+      var persisted = await getPersistedFilterCache(source.stateManager);
+      if (persisted && persisted.ageMs <= FILTER_CACHE_TTL_MS) {
+        return {
+          data: mergeFilterOptions(FALLBACK_FILTER_OPTIONS, persisted.data),
+          ttl: Math.max(1000, FILTER_CACHE_TTL_MS - persisted.ageMs)
+        };
+      }
 
-  ComixTo.prototype.fetchBrowseOptions = async function() {
-    var options;
-
-    // Comix's raw server-rendered browse payload lives at /browse. /browser can
-    // hydrate in a web browser, but extension-style HTML/API requests get 404.
-    var html = await this.fetchText(DOMAIN + "/browse");
-    var initialData = parseInitialData(html);
-    options = Object.assign({}, initialData && initialData.list && initialData.list.options || {});
+      try {
+        var options = await source.fetchBrowseOptions();
+        var merged = mergeFilterOptions(FALLBACK_FILTER_OPTIONS, options);
+        if (generation === source.filterCacheGeneration) {
+          await storePersistedFilterCache(source.stateManager, options);
+        }
+        return {
+          data: merged,
+          ttl: FILTER_CACHE_TTL_MS
+        };
+      } catch (error) {
+        if (isCloudflareBypassError(error)) {
+          throw error;
+        }
+        if (persisted) {
+          return {
+            data: mergeFilterOptions(FALLBACK_FILTER_OPTIONS, persisted.data),
+            ttl: FALLBACK_FILTER_CACHE_TTL_MS
+          };
+        }
+        return {
+          data: FALLBACK_FILTER_OPTIONS,
+          ttl: FALLBACK_FILTER_CACHE_TTL_MS
+        };
+      }
+    })();
+    this.cachedFilterDataPromise = localPromise;
 
     try {
-      options.themes = await this.fetchTagOptions("tag");
+      var cached = await localPromise;
+      if (generation === this.filterCacheGeneration && this.cachedFilterDataPromise === localPromise) {
+        this.cachedFilterData = cached.data;
+        this.cachedFilterDataExpiresAt = Date.now() + cached.ttl;
+      }
+      return cached.data;
+    } finally {
+      if (this.cachedFilterDataPromise === localPromise) {
+        this.cachedFilterDataPromise = null;
+      }
+    }
+  };
+
+  ComixTo.prototype.refreshFilterData = async function() {
+    invalidateFilterCatalogCache(this);
+    var source = this;
+    var generation = this.filterCacheGeneration;
+    var localPromise = (async function() {
+      await Promise.all([
+        source.stateManager.store(STATE_FILTER_CACHE, null),
+        source.stateManager.store(STATE_FILTER_CACHE_LEGACY, null)
+      ]);
+      var options = await source.fetchBrowseOptions();
+      var merged = mergeFilterOptions(FALLBACK_FILTER_OPTIONS, options);
+      if (generation === source.filterCacheGeneration) {
+        await storePersistedFilterCache(source.stateManager, options);
+      }
+      return {
+        data: merged,
+        ttl: FILTER_CACHE_TTL_MS
+      };
+    })();
+    this.cachedFilterDataPromise = localPromise;
+
+    try {
+      var cached = await localPromise;
+      if (generation === this.filterCacheGeneration && this.cachedFilterDataPromise === localPromise) {
+        this.cachedFilterData = cached.data;
+        this.cachedFilterDataExpiresAt = Date.now() + cached.ttl;
+      }
+      return cached.data;
+    } finally {
+      if (this.cachedFilterDataPromise === localPromise) {
+        this.cachedFilterDataPromise = null;
+      }
+    }
+  };
+
+  function invalidateFilterCatalogCache(source) {
+    source.filterCacheGeneration += 1;
+    source.cachedFilterData = null;
+    source.cachedFilterDataPromise = null;
+    source.cachedFilterDataExpiresAt = 0;
+    source.cachedTagSearchIds = {};
+    source.cachedTagSearchOrder = [];
+  }
+
+  async function getPersistedFilterCache(stateManager) {
+    var raw;
+    var parsed;
+
+    try {
+      raw = await stateManager.retrieve(STATE_FILTER_CACHE);
+      parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
     } catch (error) {
-      // /tags/search is best-effort. /browse still provides the fixed filters.
+      return null;
+    }
+
+    if (!isObject(parsed) || !isObject(parsed.data) || !isFinite(Number(parsed.ts))) {
+      return null;
+    }
+    if (Date.now() - Number(parsed.ts) > PERSISTED_FILTER_CACHE_TTL_MS) {
+      return null;
+    }
+
+    return {
+      data: parsed.data,
+      ageMs: Math.max(0, Date.now() - Number(parsed.ts))
+    };
+  }
+
+  async function storePersistedFilterCache(stateManager, data) {
+    try {
+      await stateManager.store(STATE_FILTER_CACHE, JSON.stringify({
+        ts: Date.now(),
+        data: data
+      }));
+    } catch (error) {
+      // The in-memory cache still works when persistent source state is unavailable.
+    }
+  }
+
+  ComixTo.prototype.fetchBrowseOptions = async function() {
+    // Comix's raw server-rendered browse payload lives at /browse. It already
+    // carries the fixed browse options, while free-text Tags resolve on demand.
+    var html = await this.fetchText(DOMAIN + "/browse");
+    var initialData = parseInitialData(html);
+    var options = Object.assign({}, initialData && initialData.list && initialData.list.options || {});
+
+    if (Object.keys(options).length === 0) {
+      throw new Error("ComixTo browse filters were missing from initial-data.");
     }
 
     return options;
@@ -741,6 +1293,152 @@
     }
   }
 
+  function findInitialQueryValue(queries, fragments) {
+    var keys = Object.keys(queries || {});
+
+    for (var index = 0; index < keys.length; index += 1) {
+      var key = keys[index];
+      var matches = fragments.every(function(fragment) {
+        return key.indexOf(fragment) >= 0;
+      });
+
+      if (matches) {
+        return queries[key];
+      }
+    }
+
+    return void 0;
+  }
+
+  function findInitialQueryValueByFamily(queries, namespace, name) {
+    var keys = Object.keys(queries || {});
+
+    for (var index = 0; index < keys.length; index += 1) {
+      try {
+        var parsedKey = JSON.parse(keys[index]);
+        if (Array.isArray(parsedKey) && parsedKey[0] === namespace && parsedKey[1] === name) {
+          return queries[keys[index]];
+        }
+      } catch (error) {
+        // Ignore non-JSON query keys and continue scanning.
+      }
+    }
+
+    return void 0;
+  }
+
+  function unwrapInitialQueryValue(value) {
+    var current = value;
+
+    for (var depth = 0; depth < 4; depth += 1) {
+      if (isObject(current && current.state) && current.state.data !== void 0) {
+        current = current.state.data;
+        continue;
+      }
+      if (isObject(current) && current.result !== void 0) {
+        current = current.result;
+        continue;
+      }
+      break;
+    }
+
+    return current;
+  }
+
+  function findCompleteChapterListInQueries(queries) {
+    var values = Object.keys(queries || {}).map(function(key) {
+      return queries[key];
+    });
+
+    for (var index = 0; index < values.length; index += 1) {
+      var candidate = unwrapInitialQueryValue(values[index]);
+      var items = candidate && candidate.items;
+      if (!isObject(candidate) || !Array.isArray(items) || items.length === 0) {
+        continue;
+      }
+      if (!items.every(function(item) {
+        return getChapterId(item).length > 0 && isFinite(toNumber(item && item.number, NaN));
+      })) {
+        continue;
+      }
+      if (!isCompleteChapterPage(candidate)) {
+        continue;
+      }
+      return candidate;
+    }
+
+    return null;
+  }
+
+  function findChapterPagesInQueries(queries) {
+    var values = Object.keys(queries || {}).map(function(key) {
+      return queries[key];
+    });
+
+    for (var index = 0; index < values.length; index += 1) {
+      var candidate = unwrapInitialQueryValue(values[index]);
+      if (isObject(candidate) && candidate.pages && normalizeChapterPages(candidate.pages).length > 0) {
+        return candidate;
+      }
+    }
+
+    return null;
+  }
+
+  function findMangaDetailInQueries(queries, seriesId) {
+    var keys = Object.keys(queries || {});
+    var expectedId = cleanText(seriesId || "");
+
+    for (var index = 0; index < keys.length; index += 1) {
+      var value = queries[keys[index]];
+      var candidate = isObject(value && value.result) ? value.result : value;
+      var id = cleanText(candidate && (candidate.hid || candidate.id) || "");
+
+      if (isObject(candidate) && cleanText(candidate.title || "").length > 0 &&
+        (expectedId.length === 0 || id.length === 0 || id === expectedId)) {
+        return candidate;
+      }
+    }
+
+    return null;
+  }
+
+  function createEmbeddedHomePagedResults(value, pageSize) {
+    var result = isObject(value && value.result) ? value.result : value;
+    var items = Array.isArray(result) ? result : Array.isArray(result && result.items) ? result.items : [];
+
+    if (items.length === 0) {
+      throw new Error("ComixTo homepage initial-data returned an empty embedded section.");
+    }
+
+    return App.createPagedResults({
+      results: mapSeriesItems(items),
+      // HomeSection only persists containsMoreItems, not the initial PagedResults
+      // metadata. Expose all SSR items and avoid a page-1 View More that would
+      // duplicate the embedded rows.
+      metadata: void 0
+    });
+  }
+
+  function createEmptyPagedResults() {
+    return App.createPagedResults({
+      results: []
+    });
+  }
+
+  function isDefaultHomePayloadCompatible(homeFilters, trendingDays, followedDays, latestView) {
+    var ratings = homeFilters && homeFilters.content_rating;
+
+    return trendingDays === TOP_SECTION_RANGE_DEFAULT &&
+      followedDays === TOP_SECTION_RANGE_DEFAULT &&
+      latestView === LATEST_UPDATES_VIEW_HOT &&
+      isObject(homeFilters) &&
+      Object.keys(homeFilters).length === 1 &&
+      Array.isArray(ratings) &&
+      ratings.length === 2 &&
+      ratings[0] === "safe" && ratings[1] === "suggestive";
+  }
+
   ComixTo.prototype.fetchTagOptions = async function(type) {
     var result = extractApiResult(await this.fetchJson(buildApiUrl("/tags/search", {
       type: type,
@@ -751,33 +1449,268 @@
     return Array.isArray(result) ? result : [];
   };
 
-  ComixTo.prototype.fetchJson = async function(url) {
-    var response = await this.requestManager.schedule(App.createRequest({
-      url: url,
-      method: "GET"
-    }), 1);
+  ComixTo.prototype.resolveTagIdsForNames = async function(type, rawValue, label) {
+    var names = splitCommaSeparatedValues(rawValue);
+    var resolved = [];
+    var batches = await Promise.all(names.map(function(name) {
+      return this.resolveTagIdsForName(type, name);
+    }, this));
 
-    return parseJsonResponse(response, url);
+    batches.forEach(function(ids) {
+      ids.forEach(function(id) {
+        pushUnique(resolved, id);
+      });
+    });
+
+    if (names.length > 0 && resolved.length === 0) {
+      throw new Error("No ComixTo " + String(label || type).toLowerCase() + " matches were found for " + names.join(", ") + ".");
+    }
+
+    return resolved;
+  };
+
+  ComixTo.prototype.resolveTagIdsForName = async function(type, name) {
+    var cacheKey = type + "\u0000" + String(name || "").toLowerCase();
+    var cached = this.cachedTagSearchIds[cacheKey];
+    var source = this;
+    var generation = this.filterCacheGeneration;
+
+    if (isObject(cached) && Array.isArray(cached.ids)) {
+      if (cached.expiresAt > Date.now()) {
+        touchTagSearchCacheEntry(this, cacheKey);
+        return cached.ids;
+      }
+      delete this.cachedTagSearchIds[cacheKey];
+      removeArrayValue(this.cachedTagSearchOrder, cacheKey);
+    }
+    if (cached && typeof cached.then === "function") {
+      return cached;
+    }
+
+    var pending;
+    pending = this.fetchJson(buildApiUrl("/tags/search", {
+      type: type,
+      q: name
+    })).then(function(payload) {
+      var result = extractApiResult(payload, "/tags/search");
+      var values = Array.isArray(result) ? result : Array.isArray(result && result.items) ? result.items : [];
+      var options = normalizeFilterOptions(values);
+      var exactName = cleanText(name || "").toLowerCase();
+      var exactMatches = options.filter(function(option) {
+        return cleanText(option.label || "").toLowerCase() === exactName;
+      });
+      var selected = exactMatches.length > 0 ? exactMatches : options;
+      var ids = selected.map(function(option) {
+        return option.id;
+      });
+      if (generation === source.filterCacheGeneration && source.cachedTagSearchIds[cacheKey] === pending) {
+        cacheTagSearchIds(source, cacheKey, ids);
+      }
+      return ids;
+    }).catch(function(error) {
+      if (source.cachedTagSearchIds[cacheKey] === pending) {
+        delete source.cachedTagSearchIds[cacheKey];
+        removeArrayValue(source.cachedTagSearchOrder, cacheKey);
+      }
+      throw error;
+    });
+
+    this.cachedTagSearchIds[cacheKey] = pending;
+    return pending;
+  };
+
+  function cacheTagSearchIds(source, cacheKey, ids) {
+    removeArrayValue(source.cachedTagSearchOrder, cacheKey);
+    source.cachedTagSearchIds[cacheKey] = {
+      ids: ids,
+      expiresAt: Date.now() + (ids.length > 0 ? TAG_ID_CACHE_TTL_MS : TAG_ID_EMPTY_CACHE_TTL_MS)
+    };
+    source.cachedTagSearchOrder.push(cacheKey);
+
+    while (source.cachedTagSearchOrder.length > TAG_ID_CACHE_SIZE) {
+      delete source.cachedTagSearchIds[source.cachedTagSearchOrder.shift()];
+    }
+  }
+
+  function touchTagSearchCacheEntry(source, cacheKey) {
+    removeArrayValue(source.cachedTagSearchOrder, cacheKey);
+    source.cachedTagSearchOrder.push(cacheKey);
+  }
+
+  function removeArrayValue(values, value) {
+    var index = values.indexOf(value);
+    if (index >= 0) {
+      values.splice(index, 1);
+    }
+  }
+
+  ComixTo.prototype.fetchJson = async function(url) {
+    var response = await this.fetchResponse(url);
+    var liveProtocol = this.cachedLiveProtocol;
+    var encrypted = responseHasEncryptedEnvelope(response);
+
+    if (!liveProtocol && encrypted) {
+      liveProtocol = await this.getLiveProtocol();
+    }
+
+    try {
+      return parseJsonResponse(response, url, liveProtocol);
+    } catch (error) {
+      if (!encrypted) {
+        throw error;
+      }
+
+      this.invalidateLiveProtocol();
+      try {
+        liveProtocol = await this.getLiveProtocol();
+        return parseJsonResponse(response, url, liveProtocol);
+      } catch (refreshError) {
+        throw error;
+      }
+    }
   };
 
   ComixTo.prototype.fetchText = async function(url) {
-    var response = await this.requestManager.schedule(App.createRequest({
-      url: url,
-      method: "GET"
-    }), 1);
+    var response = await this.fetchResponse(url);
 
     return parseTextResponse(response, url);
   };
 
+  ComixTo.prototype.getHomeHtml = async function() {
+    if (this.cachedHomeHtml && this.cachedHomeHtmlExpiresAt > Date.now()) {
+      return this.cachedHomeHtml;
+    }
+
+    if (this.cachedHomeHtmlPromise) {
+      return this.cachedHomeHtmlPromise;
+    }
+
+    var generation = this.homeHtmlGeneration;
+    var localPromise = this.fetchText(DOMAIN + "/");
+    this.cachedHomeHtmlPromise = localPromise;
+    try {
+      var html = await localPromise;
+      if (generation !== this.homeHtmlGeneration) {
+        return this.getHomeHtml();
+      }
+      if (generation === this.homeHtmlGeneration && this.cachedHomeHtmlPromise === localPromise) {
+        this.cachedHomeHtml = html;
+        this.cachedHomeHtmlExpiresAt = Date.now() + HOME_HTML_CACHE_TTL_MS;
+      }
+      return html;
+    } finally {
+      if (this.cachedHomeHtmlPromise === localPromise) {
+        this.cachedHomeHtmlPromise = null;
+      }
+    }
+  };
+
+  ComixTo.prototype.getLiveProtocol = async function() {
+    if (this.cachedLiveProtocol) {
+      return this.cachedLiveProtocol;
+    }
+    if (this.cachedLiveProtocolPromise) {
+      return this.cachedLiveProtocolPromise;
+    }
+
+    var generation = this.liveProtocolGeneration;
+    var localPromise = this.bootstrapLiveProtocol();
+    this.cachedLiveProtocolPromise = localPromise;
+
+    try {
+      var protocol = await localPromise;
+      if (generation !== this.liveProtocolGeneration) {
+        return this.getLiveProtocol();
+      }
+      if (generation === this.liveProtocolGeneration && this.cachedLiveProtocolPromise === localPromise) {
+        this.cachedLiveProtocol = protocol;
+      }
+      return protocol;
+    } finally {
+      if (this.cachedLiveProtocolPromise === localPromise) {
+        this.cachedLiveProtocolPromise = null;
+      }
+    }
+  };
+
+  ComixTo.prototype.bootstrapLiveProtocol = async function() {
+    var homeHtml = await this.getHomeHtml();
+    var mainUrl = extractLiveMainBundleUrl(homeHtml);
+    var mainCode = await this.fetchText(mainUrl);
+    var secureUrl = extractLiveSecureBundleUrl(mainCode, mainUrl);
+    var secureCode = await this.fetchText(secureUrl);
+
+    return createLiveProtocolFromBundle(secureCode, secureUrl);
+  };
+
+  ComixTo.prototype.signLiveApiUrl = async function(url) {
+    var unsignedUrl = removeQueryParam(url, "_");
+    var requestConfig = buildLiveSignerRequestConfig(unsignedUrl);
+    var protocol = await this.getLiveProtocol();
+    var signedConfig = await protocol.requestInterceptor(requestConfig);
+    var token = cleanText(signedConfig && signedConfig.params && signedConfig.params._ || "");
+
+    if (token.length === 0) {
+      throw new Error("ComixTo's current signer bundle did not produce a request token.");
+    }
+
+    return appendRawQueryParam(unsignedUrl, "_", token);
+  };
+
+  ComixTo.prototype.invalidateLiveProtocol = function() {
+    this.liveProtocolGeneration += 1;
+    this.homeHtmlGeneration += 1;
+    this.cachedLiveProtocol = null;
+    this.cachedLiveProtocolPromise = null;
+    this.cachedHomeHtml = null;
+    this.cachedHomeHtmlPromise = null;
+    this.cachedHomeHtmlExpiresAt = 0;
+  };
+
+  ComixTo.prototype.fetchResponse = async function(url) {
+    var lastError;
+
+    for (var attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        var requestUrl = attempt > 0 && !isSignedApiRequestUrl(url) ? addRetryQueryParam(url, attempt) : url;
+        var response = await this.requestManager.schedule(App.createRequest({
+          url: requestUrl,
+          method: "GET"
+        }), 1);
+
+        if (attempt === 0 && isSignerProtectedApiUrl(url) && isSignerRejectedResponse(response)) {
+          this.invalidateLiveProtocol();
+          continue;
+        }
+
+        if (attempt === 0 && shouldRetryResponse(response)) {
+          continue;
+        }
+
+        return response;
+      } catch (error) {
+        lastError = error;
+        if (isCloudflareBypassError(error)) {
+          throw error;
+        }
+        if (attempt > 0 || !shouldRetryThrownError(error)) {
+          throw error;
+        }
+      }
+    }
+
+    throw lastError || new Error("ComixTo request failed before receiving a response.");
+  };
+
   // Response Helpers
 
-  function parseJsonResponse(response, url) {
+  function parseJsonResponse(response, url, liveProtocol) {
     var raw = response && typeof response.data === "string" ? response.data : JSON.stringify(response && response.data || "");
     var parsed;
     ensureReadableResponse(response, raw, url);
 
     if (isObject(response.data)) {
-      return decodeComixEnvelope(response.data, url);
+      return decodeComixEnvelope(response.data, url, liveProtocol);
     }
 
     try {
@@ -786,10 +1719,30 @@
       throw new Error("ComixTo returned unreadable JSON from " + formatRequestLabel(url) + ": " + String(error) + "." + buildDiagnosticPreview(raw));
     }
 
-    return decodeComixEnvelope(parsed, url);
+    return decodeComixEnvelope(parsed, url, liveProtocol);
   }
 
-  function decodeComixEnvelope(payload, url) {
+  function responseHasEncryptedEnvelope(response) {
+    var data = response && response.data;
+    var parsed;
+
+    if (isObject(data)) {
+      return typeof data.e === "string";
+    }
+
+    if (typeof data !== "string") {
+      return false;
+    }
+
+    try {
+      parsed = JSON.parse(data);
+      return isObject(parsed) && typeof parsed.e === "string";
+    } catch (error) {
+      return false;
+    }
+  }
+
+  function decodeComixEnvelope(payload, url, liveProtocol) {
     var decrypted;
 
     if (!isObject(payload) || typeof payload.e !== "string") {
@@ -797,10 +1750,14 @@
     }
 
     try {
-      decrypted = decryptComixEnvelope(payload.e);
+      if (!liveProtocol || typeof liveProtocol.decodeEnvelope !== "function") {
+        throw new Error("the current live protocol decoder is unavailable");
+      }
+
+      decrypted = liveProtocol.decodeEnvelope(payload.e);
       return JSON.parse(decrypted);
     } catch (error) {
-      throw new Error("ComixTo returned an unreadable encrypted API envelope from " + formatRequestLabel(url) + ": " + String(error) + "." + buildDiagnosticPreview(JSON.stringify(payload)));
+      throw new Error("ComixTo returned an unreadable encrypted API envelope from " + formatRequestLabel(url) + ": " + String(error) + ". The site may have rotated its API cipher." + buildDiagnosticPreview(JSON.stringify(payload)));
     }
   }
 
@@ -837,17 +1794,833 @@
       throw new Error("ComixTo returned an invalid response from " + formatRequestLabel(url) + ".");
     }
 
-    if (isChallengePage(body)) {
+    if (isCloudflareMitigatedResponse(response) || isChallengePage(body)) {
       throw new Error("Cloudflare Bypass Required");
     }
 
     if (response.status === 404) {
-      throw new Error("The requested ComixTo page was not found.");
+      throw new Error("The requested ComixTo page was not found." + buildResponseDiagnosticContext(response));
+    }
+
+    if ((response.status === 401 || response.status === 403 || response.status === 422) && isSignerProtectedApiUrl(url)) {
+      throw new Error("ComixTo rejected a signer-protected API request with HTTP " + response.status + ". The site may have rotated its request signer and this Paperback source needs a signer refresh." + buildResponseDiagnosticContext(response));
     }
 
     if (response.status >= 400) {
-      throw new Error("ComixTo returned HTTP " + response.status + " from " + formatRequestLabel(url) + "." + buildDiagnosticPreview(body));
+      throw new Error("ComixTo returned HTTP " + response.status + " from " + formatRequestLabel(url) + "." + buildResponseDiagnosticContext(response) + buildDiagnosticPreview(body));
     }
+  }
+
+  function shouldRetryResponse(response) {
+    var status = response && response.status;
+    var body;
+
+    if (!TRANSIENT_HTTP_STATUSES[status]) {
+      return false;
+    }
+
+    body = response && typeof response.data === "string" ? response.data : JSON.stringify(response && response.data || "");
+    return !isCloudflareMitigatedResponse(response) && !isChallengePage(body);
+  }
+
+  function shouldRetryThrownError(error) {
+    var message = cleanText(error && error.message || error || "").toLowerCase();
+
+    return /(timeout|timed out|network|connection|socket|temporar|econn|reset by peer|connection reset)/i.test(message);
+  }
+
+  function isSignerRejectedResponse(response) {
+    var status = response && response.status;
+    var body;
+
+    if (status !== 401 && status !== 403 && status !== 422) {
+      return false;
+    }
+
+    body = response && typeof response.data === "string" ? response.data : JSON.stringify(response && response.data || "");
+    return !isCloudflareMitigatedResponse(response) && !isChallengePage(body);
+  }
+
+  function addRetryQueryParam(url, attempt) {
+    var value = String(url || "");
+    var separator = value.indexOf("?") >= 0 ? "&" : "?";
+
+    return value + separator + "r=" + encodeURIComponent(String(attempt));
+  }
+
+  function extractLiveMainBundleUrl(html) {
+    var match = String(html || "").match(/<script\b[^>]*\bsrc=["']([^"']*\/dist\/main-[^"']+\.js)["'][^>]*>/i);
+
+    if (!match) {
+      throw new Error("ComixTo homepage did not expose the current main bundle.");
+    }
+
+    return resolveComixAssetUrl(DOMAIN + "/", match[1]);
+  }
+
+  function extractLiveSecureBundleUrl(mainCode, mainUrl) {
+    var match = String(mainCode || "").match(/(?:\.\/)?(secure-[A-Za-z0-9_-]+\.js)/);
+
+    if (!match) {
+      throw new Error("ComixTo main bundle did not expose the current secure bundle.");
+    }
+
+    return resolveComixAssetUrl(mainUrl, match[1]);
+  }
+
+  function resolveComixAssetUrl(baseUrl, value) {
+    var asset = cleanText(value || "");
+    var base = String(baseUrl || DOMAIN + "/");
+
+    if (/^https?:\/\//i.test(asset)) {
+      return asset;
+    }
+    if (asset.indexOf("//") === 0) {
+      return "https:" + asset;
+    }
+    if (asset.charAt(0) === "/") {
+      return DOMAIN + asset;
+    }
+
+    return base.slice(0, base.lastIndexOf("/") + 1) + asset.replace(/^\.\//, "");
+  }
+
+  function createLiveProtocolFromBundle(code, secureUrl) {
+    var source = String(code || "");
+    var exportMatch = source.match(/export\s*\{([^}]*)\}\s*;?\s*$/);
+    var exportedNames = [];
+    var sandboxGlobal;
+    var sandboxWindow;
+    var evaluator;
+
+    if (typeof Function !== "function" || typeof Proxy !== "function") {
+      throw new Error("This Paperback runtime cannot execute ComixTo's live signer bundle.");
+    }
+
+    if (exportMatch) {
+      exportMatch[1].split(",").forEach(function(part) {
+        var match = cleanText(part).match(/^([A-Za-z_$][\w$]*)(?:\s+as\s+[A-Za-z_$][\w$]*)?$/);
+        if (match && exportedNames.indexOf(match[1]) < 0) {
+          exportedNames.push(match[1]);
+        }
+      });
+      source = source.slice(0, exportMatch.index);
+    }
+
+    var document = createLiveSandboxProxy("document", {
+      querySelector: function() { return null; },
+      querySelectorAll: function() { return []; },
+      createElement: function() {
+        return createLiveSandboxProxy("element", {
+          style: createLiveSandboxProxy("element.style"),
+          setAttribute: function() {}
+        });
+      },
+      head: createLiveSandboxProxy("document.head"),
+      body: createLiveSandboxProxy("document.body")
+    });
+    var location = createLiveSandboxProxy("location", {
+      href: DOMAIN + "/",
+      origin: DOMAIN,
+      protocol: "https:",
+      host: "comix.to",
+      hostname: "comix.to",
+      pathname: "/",
+      search: "",
+      hash: "",
+      toString: function() { return DOMAIN + "/"; }
+    });
+    var navigator = createLiveSandboxProxy("navigator", {
+      appCodeName: "Mozilla",
+      userAgent: "Mozilla/5.0"
+    });
+    var fakeFetch = async function() {
+      return {
+        ok: true,
+        status: 200,
+        text: async function() { return "{}"; },
+        json: async function() { return {}; },
+        headers: {}
+      };
+    };
+    var noTimer = function() { return 0; };
+    var clearTimer = function() {};
+    var LiveTextEncoder = createLiveTextEncoder();
+    var LiveTextDecoder = createLiveTextDecoder();
+
+    sandboxGlobal = {
+      document: document,
+      location: location,
+      navigator: navigator,
+      fetch: fakeFetch,
+      Object: Object,
+      Array: Array,
+      String: String,
+      Number: Number,
+      Boolean: Boolean,
+      RegExp: RegExp,
+      Date: Date,
+      Math: Math,
+      JSON: JSON,
+      Promise: Promise,
+      Function: Function,
+      Map: typeof Map === "function" ? Map : void 0,
+      Set: typeof Set === "function" ? Set : void 0,
+      WeakMap: typeof WeakMap === "function" ? WeakMap : void 0,
+      WeakSet: typeof WeakSet === "function" ? WeakSet : void 0,
+      Reflect: typeof Reflect === "object" ? Reflect : void 0,
+      Symbol: typeof Symbol === "function" ? Symbol : void 0,
+      Error: Error,
+      TypeError: TypeError,
+      RangeError: RangeError,
+      ArrayBuffer: typeof ArrayBuffer === "function" ? ArrayBuffer : void 0,
+      DataView: typeof DataView === "function" ? DataView : void 0,
+      Uint8Array: typeof Uint8Array === "function" ? Uint8Array : void 0,
+      Uint16Array: typeof Uint16Array === "function" ? Uint16Array : void 0,
+      Uint32Array: typeof Uint32Array === "function" ? Uint32Array : void 0,
+      Int8Array: typeof Int8Array === "function" ? Int8Array : void 0,
+      Int16Array: typeof Int16Array === "function" ? Int16Array : void 0,
+      Int32Array: typeof Int32Array === "function" ? Int32Array : void 0,
+      Float32Array: typeof Float32Array === "function" ? Float32Array : void 0,
+      Float64Array: typeof Float64Array === "function" ? Float64Array : void 0,
+      parseInt: parseInt,
+      parseFloat: parseFloat,
+      isFinite: isFinite,
+      encodeURIComponent: encodeURIComponent,
+      decodeURIComponent: decodeURIComponent,
+      TextEncoder: LiveTextEncoder,
+      TextDecoder: LiveTextDecoder,
+      atob: liveAtob,
+      btoa: liveBtoa,
+      console: { log: function() {}, error: function() {}, warn: function() {} },
+      setTimeout: noTimer,
+      clearTimeout: clearTimer,
+      setInterval: noTimer,
+      clearInterval: clearTimer
+    };
+    sandboxWindow = createLiveSandboxProxy("window", sandboxGlobal);
+    sandboxGlobal.window = sandboxWindow;
+    sandboxGlobal.self = sandboxWindow;
+    sandboxGlobal.global = sandboxWindow;
+
+    try {
+      evaluator = Function(
+        "window", "document", "location", "navigator", "fetch", "self", "global", "globalThis",
+        "TextEncoder", "TextDecoder", "atob", "btoa", "setTimeout", "clearTimeout", "setInterval", "clearInterval",
+        source
+      );
+      evaluator(
+        sandboxWindow, document, location, navigator, fakeFetch, sandboxWindow, sandboxWindow, sandboxGlobal,
+        LiveTextEncoder, LiveTextDecoder, liveAtob, liveBtoa, noTimer, clearTimer, noTimer, clearTimer
+      );
+    } catch (error) {
+      throw new Error("ComixTo could not initialize the current secure bundle " + formatRequestLabel(secureUrl) + ": " + String(error) + ".");
+    }
+
+    if (typeof sandboxGlobal.Bf === "function") {
+      exportedNames = ["Bf"].concat(exportedNames.filter(function(name) {
+        return name !== "Bf";
+      }));
+    } else if (exportedNames.indexOf("Bf") < 0) {
+      exportedNames.push("Bf");
+    }
+
+    var liveCodec = findLiveProtocolCodec(sandboxGlobal);
+
+    for (var index = 0; index < exportedNames.length; index += 1) {
+      var candidate = sandboxGlobal[exportedNames[index]];
+      var requestInterceptor;
+      var responseInterceptor;
+      var axiosMock;
+
+      if (typeof candidate !== "function") {
+        continue;
+      }
+
+      axiosMock = {
+        interceptors: {
+          request: {
+            use: function(success) {
+              requestInterceptor = success;
+            }
+          },
+          response: {
+            use: function(success) {
+              responseInterceptor = success;
+            }
+          }
+        },
+        defaults: { headers: { common: {} } }
+      };
+
+      try {
+        candidate(axiosMock);
+      } catch (error) {
+        continue;
+      }
+
+      if (typeof requestInterceptor === "function") {
+        return {
+          requestInterceptor: requestInterceptor,
+          responseInterceptor: responseInterceptor,
+          encodeEnvelope: liveCodec && typeof liveCodec.O === "function" ? function(value) {
+            return liveCodec.O(value);
+          } : null,
+          decodeEnvelope: liveCodec && typeof liveCodec.D === "function" ? function(value) {
+            return liveCodec.D(value);
+          } : null
+        };
+      }
+    }
+
+    throw new Error("ComixTo's current secure bundle did not expose a usable request signer.");
+  }
+
+  function findLiveProtocolCodec(sandboxGlobal) {
+    var keys = Object.keys(sandboxGlobal || {});
+
+    for (var index = 0; index < keys.length; index += 1) {
+      var value = sandboxGlobal[keys[index]];
+      if (isObject(value) && typeof value.O === "function" && typeof value.D === "function" && typeof value.A === "function") {
+        return value;
+      }
+    }
+
+    return null;
+  }
+
+  function createLiveSandboxProxy(name, overrides) {
+    var values = overrides || {};
+    var target = function() {};
+
+    return new Proxy(target, {
+      get: function(_target, property) {
+        if (typeof property === "string" && Object.prototype.hasOwnProperty.call(values, property)) {
+          return values[property];
+        }
+        if (property === "then" || typeof property === "symbol") {
+          return void 0;
+        }
+        return createLiveSandboxProxy(name + "." + String(property));
+      },
+      set: function(_target, property, value) {
+        if (typeof property === "string") {
+          values[property] = value;
+        }
+        return true;
+      },
+      apply: function() {
+        return createLiveSandboxProxy(name + "()");
+      },
+      construct: function() {
+        return createLiveSandboxProxy("new " + name);
+      }
+    });
+  }
+
+  function createLiveTextEncoder() {
+    function LiveTextEncoder() {}
+    LiveTextEncoder.prototype.encode = function(value) {
+      var bytes = stringToUtf8Bytes(value);
+      return typeof Uint8Array === "function" ? new Uint8Array(bytes) : bytes;
+    };
+    return LiveTextEncoder;
+  }
+
+  function createLiveTextDecoder() {
+    function LiveTextDecoder() {}
+    LiveTextDecoder.prototype.decode = function(value) {
+      return utf8BytesToString(Array.prototype.slice.call(value || []));
+    };
+    return LiveTextDecoder;
+  }
+
+  function liveAtob(value) {
+    return b64Decode(value).map(function(byte) {
+      return String.fromCharCode(byte);
+    }).join("");
+  }
+
+  function liveBtoa(value) {
+    var bytes = [];
+    var source = String(value || "");
+    var encoded;
+
+    for (var index = 0; index < source.length; index += 1) {
+      bytes.push(source.charCodeAt(index) & 255);
+    }
+
+    encoded = b64UrlEncode(bytes).replace(/-/g, "+").replace(/_/g, "/");
+    while (encoded.length % 4 !== 0) {
+      encoded += "=";
+    }
+    return encoded;
+  }
+
+  function buildLiveSignerRequestConfig(url) {
+    var value = String(url || "");
+    var pathAndQuery;
+    var queryIndex;
+
+    if (value.indexOf(DOMAIN) !== 0) {
+      throw new Error("ComixTo cannot sign a non-Comix API URL.");
+    }
+
+    pathAndQuery = value.slice(DOMAIN.length);
+    queryIndex = pathAndQuery.indexOf("?");
+
+    return {
+      url: queryIndex >= 0 ? pathAndQuery.slice(0, queryIndex) : pathAndQuery,
+      headers: {},
+      params: parseLiveSignerParams(queryIndex >= 0 ? pathAndQuery.slice(queryIndex + 1) : "")
+    };
+  }
+
+  function parseLiveSignerParams(rawQuery) {
+    var params = {};
+
+    String(rawQuery || "").split("&").forEach(function(part) {
+      var equalsIndex;
+      var key;
+      var value;
+      var arrayMatch;
+      var objectMatch;
+
+      if (!part) {
+        return;
+      }
+
+      equalsIndex = part.indexOf("=");
+      key = decodeQueryComponent(equalsIndex >= 0 ? part.slice(0, equalsIndex) : part);
+      value = decodeQueryComponent(equalsIndex >= 0 ? part.slice(equalsIndex + 1) : "");
+      if (key === "_") {
+        return;
+      }
+
+      arrayMatch = key.match(/^([^\[]+)\[\]$/);
+      if (arrayMatch) {
+        if (!Array.isArray(params[arrayMatch[1]])) {
+          params[arrayMatch[1]] = [];
+        }
+        params[arrayMatch[1]].push(value);
+        return;
+      }
+
+      objectMatch = key.match(/^([^\[]+)\[([^\]]+)\]$/);
+      if (objectMatch) {
+        if (!isObject(params[objectMatch[1]])) {
+          params[objectMatch[1]] = {};
+        }
+        params[objectMatch[1]][objectMatch[2]] = value;
+        return;
+      }
+
+      if (params[key] === void 0) {
+        params[key] = value;
+      } else if (Array.isArray(params[key])) {
+        params[key].push(value);
+      } else {
+        params[key] = [params[key], value];
+      }
+    });
+
+    return params;
+  }
+
+  function decodeQueryComponent(value) {
+    try {
+      return decodeURIComponent(String(value || "").replace(/\+/g, " "));
+    } catch (error) {
+      return String(value || "");
+    }
+  }
+
+  function removeQueryParam(url, name) {
+    var value = String(url || "");
+    var hashIndex = value.indexOf("#");
+    var fragment = hashIndex >= 0 ? value.slice(hashIndex) : "";
+    var withoutFragment = hashIndex >= 0 ? value.slice(0, hashIndex) : value;
+    var queryIndex = withoutFragment.indexOf("?");
+    var base = queryIndex >= 0 ? withoutFragment.slice(0, queryIndex) : withoutFragment;
+    var query = queryIndex >= 0 ? withoutFragment.slice(queryIndex + 1) : "";
+    var kept = query.split("&").filter(function(part) {
+      var equalsIndex = part.indexOf("=");
+      var key = decodeQueryComponent(equalsIndex >= 0 ? part.slice(0, equalsIndex) : part);
+      return part.length > 0 && key !== name;
+    });
+
+    return base + (kept.length > 0 ? "?" + kept.join("&") : "") + fragment;
+  }
+
+  function appendRawQueryParam(url, key, value) {
+    var source = String(url || "");
+    var hashIndex = source.indexOf("#");
+    var fragment = hashIndex >= 0 ? source.slice(hashIndex) : "";
+    var base = hashIndex >= 0 ? source.slice(0, hashIndex) : source;
+    var separator = base.indexOf("?") >= 0 ? "&" : "?";
+
+    return base + separator + encodeURIComponent(key) + "=" + encodeURIComponent(String(value)) + fragment;
+  }
+
+  function isImageRequestUrl(url) {
+    var value = String(url || "");
+
+    if (/\.(?:avif|gif|jpe?g|png|webp)(?:[?#]|$)/i.test(value)) {
+      return true;
+    }
+
+    return /^https:\/\/static\.comix\.to(?:\/|$)/i.test(value);
+  }
+
+  async function processComixImageResponse(response) {
+    if (!response || !response.rawData) {
+      return response;
+    }
+
+    var hasScrambleHeaders = getHeaderIgnoreCase(response.headers, "x-scramble-seed") !== void 0 || getHeaderIgnoreCase(response.headers, "x-scramble-grid") !== void 0;
+    var scramble = readComixScrambleHeaders(response.headers);
+    if (hasScrambleHeaders && !scramble) {
+      throw new Error("ComixTo returned an unsupported scrambled image header set.");
+    }
+    if (scramble) {
+      if (!canUsePaperbackCanvas()) {
+        throw new Error("This Paperback runtime cannot descramble the protected ComixTo image.");
+      }
+      try {
+        var decoded = descrambleComixImage(response.rawData, scramble);
+        if (decoded && decoded.data) {
+          response.rawData = decoded.data;
+          response.mimeType = decoded.mime;
+          setHeaderIgnoreCase(response.headers, "content-type", decoded.mime);
+        }
+      } catch (error) {
+        throw new Error("ComixTo image descrambling failed: " + String(error) + ".");
+      }
+      return response;
+    }
+
+    var hasEncryptionHeaders = getHeaderIgnoreCase(response.headers, "x-enc-seed") !== void 0 ||
+      getHeaderIgnoreCase(response.headers, "x-enc-len") !== void 0 ||
+      getHeaderIgnoreCase(response.headers, "x-enc-algo") !== void 0;
+    var encrypted = readComixEncryptionHeaders(response.headers);
+    if (hasEncryptionHeaders && !encrypted) {
+      throw new Error("ComixTo returned an unsupported encrypted image header set.");
+    }
+    if (encrypted) {
+      if (typeof App.createByteArray !== "function") {
+        throw new Error("This Paperback runtime cannot decrypt the protected ComixTo image.");
+      }
+      try {
+        var bytes = App.createByteArray(response.rawData);
+        if (encrypted.algo === 1) {
+          decryptComixImageAlgo1(bytes, encrypted.seed, encrypted.length);
+        } else if (encrypted.algo === 2) {
+          decryptComixImageAlgo2(bytes, encrypted.seed, encrypted.length);
+        } else {
+          throw new Error("unsupported X-Enc algorithm " + encrypted.algo);
+        }
+      } catch (error) {
+        throw new Error("ComixTo image decryption failed: " + String(error) + ".");
+      }
+    }
+
+    return response;
+  }
+
+  function getHeaderIgnoreCase(headers, name) {
+    var normalized = String(name || "").toLowerCase();
+    var keys = Object.keys(headers || {});
+
+    for (var index = 0; index < keys.length; index += 1) {
+      if (String(keys[index]).toLowerCase() === normalized) {
+        return headers[keys[index]];
+      }
+    }
+
+    return void 0;
+  }
+
+  function setHeaderIgnoreCase(headers, name, value) {
+    if (!headers) {
+      return;
+    }
+
+    removeHeaderIgnoreCase(headers, name);
+    headers[name] = value;
+  }
+
+  function readComixEncryptionHeaders(headers) {
+    var seed = toPositiveInteger(getHeaderIgnoreCase(headers, "x-enc-seed"), 0);
+    var length = toPositiveInteger(getHeaderIgnoreCase(headers, "x-enc-len"), 0);
+    var rawAlgo = getHeaderIgnoreCase(headers, "x-enc-algo");
+    var algo = rawAlgo === void 0 ? 1 : toPositiveInteger(rawAlgo, 0);
+
+    if (seed <= 0 || length <= 0 || algo <= 0) {
+      return null;
+    }
+
+    return {
+      seed: seed >>> 0,
+      length: length,
+      algo: algo
+    };
+  }
+
+  function decryptComixImageAlgo1(bytes, seed, length) {
+    var state = seed >>> 0;
+    var limit = Math.min(toPositiveInteger(length, 0), bytes.length || 0);
+
+    for (var index = 0; index < limit; index += 1) {
+      state = (Math.imul(state, 1000005) + 0x499602d3) >>> 0;
+      bytes[index] = (bytes[index] ^ (state >>> 24 & 255)) & 255;
+    }
+  }
+
+  function decryptComixImageAlgo2(bytes, seed, length) {
+    var table = getComixImageAlgo2Table();
+    var limit = Math.min(toPositiveInteger(length, 0), bytes.length || 0);
+    var wordCount = Math.ceil(limit / 4);
+    var words = [];
+    var wordIndex;
+    var seedBits;
+    var bitIndex;
+    var value;
+    var tapIndex;
+    var byteIndex;
+    var word;
+
+    if (limit <= 0) {
+      return;
+    }
+
+    for (wordIndex = 0; wordIndex < 32; wordIndex += 1) {
+      value = table[wordIndex] >>> 0;
+      seedBits = seed >>> 0;
+      bitIndex = 0;
+      while (seedBits !== 0) {
+        if (seedBits & 1) {
+          value ^= table[32 + bitIndex * 32 + wordIndex] >>> 0;
+        }
+        seedBits >>>= 1;
+        bitIndex += 1;
+      }
+      words[wordIndex] = value >>> 0;
+    }
+
+    for (wordIndex = 32; wordIndex < wordCount; wordIndex += 1) {
+      value = 0;
+      for (tapIndex = 0; tapIndex < 32; tapIndex += 1) {
+        if ((COMIX_IMAGE_ALGO2_TAPS >>> tapIndex) & 1) {
+          value ^= words[wordIndex - 32 + tapIndex] >>> 0;
+        }
+      }
+      words[wordIndex] = value >>> 0;
+    }
+
+    for (wordIndex = 0; wordIndex < wordCount; wordIndex += 1) {
+      word = words[wordIndex] >>> 0;
+      for (byteIndex = 0; byteIndex < 4; byteIndex += 1) {
+        var offset = wordIndex * 4 + byteIndex;
+        if (offset >= limit) {
+          break;
+        }
+        bytes[offset] = (bytes[offset] ^ (word >>> byteIndex * 8 & 255)) & 255;
+      }
+    }
+  }
+
+  function getComixImageAlgo2Table() {
+    var bytes;
+    var table;
+    var index;
+
+    if (decodedComixImageAlgo2Table) {
+      return decodedComixImageAlgo2Table;
+    }
+
+    bytes = b64Decode(COMIX_IMAGE_ALGO2_PACKED);
+    table = [];
+    for (index = 0; index + 3 < bytes.length; index += 4) {
+      table.push((
+        bytes[index] |
+        bytes[index + 1] << 8 |
+        bytes[index + 2] << 16 |
+        bytes[index + 3] << 24
+      ) >>> 0);
+    }
+
+    decodedComixImageAlgo2Table = table;
+    return decodedComixImageAlgo2Table;
+  }
+
+  function readComixScrambleHeaders(headers) {
+    var seedRaw = getHeaderIgnoreCase(headers, "x-scramble-seed");
+    var gridRaw = cleanText(getHeaderIgnoreCase(headers, "x-scramble-grid") || "");
+    var algoRaw = getHeaderIgnoreCase(headers, "x-scramble-algo");
+    var hashRaw = cleanText(getHeaderIgnoreCase(headers, "x-scramble-hash") || "");
+    var gridMatch = gridRaw.match(/^(\d+)\s*x\s*(\d+)$/i);
+    var seed = Number(seedRaw);
+    var cols;
+    var rows;
+    var algo;
+    var hashXor;
+
+    if (!isFinite(seed) || seed < 0 || !gridMatch) {
+      return null;
+    }
+
+    cols = toPositiveInteger(gridMatch[1], 0);
+    rows = toPositiveInteger(gridMatch[2], 0);
+    if (cols <= 0 || rows <= 0 || cols * rows > 400) {
+      return null;
+    }
+
+    algo = toPositiveInteger(algoRaw, 2);
+    hashXor = decodeComixScrambleHash(hashRaw);
+    if (hashRaw.length > 0 && hashXor === null) {
+      // Unknown keyed seed mapping is safer to leave untouched than mis-shuffle.
+      return null;
+    }
+
+    return {
+      seed: seed >>> 0,
+      cols: cols,
+      rows: rows,
+      algo: algo,
+      hashXor: hashXor || 0
+    };
+  }
+
+  function decodeComixScrambleHash(value) {
+    var token = cleanText(value || "");
+
+    if (token.length === 0) {
+      return 0;
+    }
+    if (token === "03632") {
+      return 58414;
+    }
+    if (token === "02900") {
+      return 117532;
+    }
+
+    return null;
+  }
+
+  function canUsePaperbackCanvas() {
+    return typeof App.createPBImage === "function" && typeof App.createPBCanvas === "function";
+  }
+
+  function descrambleComixImage(rawData, params) {
+    var sourceImage = App.createPBImage({ data: rawData });
+    var width = toPositiveInteger(sourceImage && sourceImage.width, 0);
+    var height = toPositiveInteger(sourceImage && sourceImage.height, 0);
+    var tileWidth = Math.floor(width / params.cols);
+    var tileHeight = Math.floor(height / params.rows);
+    var tileCount = params.cols * params.rows;
+    var mode = params.algo === 3 && params.cols === 5 && params.rows === 5 ? "gf2affine" : "xorshift";
+    var lookup = computeComixDescrambleLookup(mode, (params.seed ^ params.hashXor) >>> 0, tileCount);
+    var canvas;
+    var encoded;
+    var mime;
+
+    if (width <= 0 || height <= 0 || tileWidth <= 0 || tileHeight <= 0) {
+      throw new Error("ComixTo returned an invalid scrambled image size.");
+    }
+
+    canvas = App.createPBCanvas();
+    canvas.setSize(width, height);
+    canvas.drawImage(sourceImage, 0, 0, width, height, 0, 0);
+
+    lookup.forEach(function(sourceIndex, cleanIndex) {
+      var cleanRow = Math.floor(cleanIndex / params.cols);
+      var cleanCol = cleanIndex % params.cols;
+      var sourceRow = Math.floor(sourceIndex / params.cols);
+      var sourceCol = sourceIndex % params.cols;
+
+      canvas.drawImage(
+        sourceImage,
+        sourceCol * tileWidth,
+        sourceRow * tileHeight,
+        tileWidth,
+        tileHeight,
+        cleanCol * tileWidth,
+        cleanRow * tileHeight
+      );
+    });
+
+    encoded = canvas.encode("image/webp");
+    mime = "image/webp";
+    if (!encoded) {
+      encoded = canvas.encode("image/png");
+      mime = "image/png";
+    }
+    if (!encoded) {
+      throw new Error("Paperback could not encode the descrambled ComixTo image.");
+    }
+
+    return {
+      data: encoded,
+      mime: mime
+    };
+  }
+
+  function computeComixDescrambleLookup(mode, seed, tileCount) {
+    var permutation = [];
+    var state = mode === "gf2affine" ? (seed | 1) >>> 0 : seed >>> 0;
+    var index;
+    var swapIndex;
+    var temporary;
+    var inverse = [];
+
+    for (index = 0; index < tileCount; index += 1) {
+      permutation[index] = index;
+    }
+
+    for (index = tileCount - 1; index > 0; index -= 1) {
+      state ^= state << 13;
+      state >>>= 0;
+      state ^= state >>> 17;
+      state ^= state << 5;
+      state >>>= 0;
+      swapIndex = state % (index + 1);
+      temporary = permutation[index];
+      permutation[index] = permutation[swapIndex];
+      permutation[swapIndex] = temporary;
+    }
+
+    for (index = 0; index < tileCount; index += 1) {
+      inverse[permutation[index]] = index;
+    }
+
+    return inverse;
+  }
+
+  function removeHeaderIgnoreCase(headers, name) {
+    var normalized = String(name || "").toLowerCase();
+
+    Object.keys(headers || {}).forEach(function(key) {
+      if (String(key).toLowerCase() === normalized) {
+        delete headers[key];
+      }
+    });
+  }
+
+  function isSignedApiRequestUrl(url) {
+    var value = String(url || "");
+    return value.indexOf(API_BASE) === 0 && /[?&]_=/.test(value);
+  }
+
+  function isSignerProtectedApiUrl(url) {
+    var value = String(url || "");
+    var path;
+
+    if (value.indexOf(API_BASE) !== 0) {
+      return false;
+    }
+
+    path = value.slice(API_BASE.length).split("?")[0];
+    return /^\/manga(?:\/|$)/.test(path) || /^\/chapters\/[^/]+/.test(path);
   }
 
   function extractApiResult(payload, label) {
@@ -879,6 +2652,29 @@
     return ' Preview: "' + preview.replace(/"/g, "'") + '"';
   }
 
+  function buildResponseDiagnosticContext(response) {
+    var headers = response && response.headers;
+    var values = [
+      ["content-type", getHeaderIgnoreCase(headers, "content-type")],
+      ["server", getHeaderIgnoreCase(headers, "server")],
+      ["cf-ray", getHeaderIgnoreCase(headers, "cf-ray")]
+    ];
+    var parts = [];
+
+    values.forEach(function(entry) {
+      var value = cleanText(entry[1] || "");
+      if (value.length > 0) {
+        parts.push(entry[0] + "=" + value);
+      }
+    });
+
+    return parts.length > 0 ? " [" + parts.join(" ") + "]" : "";
+  }
+
+  function isCloudflareMitigatedResponse(response) {
+    return cleanText(getHeaderIgnoreCase(response && response.headers, "cf-mitigated") || "").toLowerCase() === "challenge";
+  }
+
   function isChallengePage(body) {
     var text = String(body || "").toLowerCase();
     var hasHtmlShell = text.indexOf("<html") >= 0 || text.indexOf("<!doctype html") >= 0;
@@ -902,7 +2698,7 @@
   }
 
   function formatRequestLabel(url) {
-    var value = String(url || "");
+    var value = String(url || "").replace(/([?&]_)=([^&]*)/g, "$1=<redacted>");
     if (value.indexOf(API_BASE) === 0) {
       return value.slice(API_BASE.length) || "/";
     }
@@ -954,14 +2750,60 @@
 
   function buildSeriesSubtitle(item) {
     var latestChapter = toNumber(item && item.latestChapter, NaN);
-    var status;
+    var parts = [];
+    var updateLabel = getSeriesUpdateLabel(item);
+    var year = toPositiveInteger(item && item.year, 0);
+    var status = formatStatus(item && item.status);
 
     if (isFinite(latestChapter) && (latestChapter > 0 || (item && item.hasChapters === true && latestChapter >= 0))) {
-      return "Chapter " + formatChapterNumber(latestChapter);
+      parts.push("Ch. " + formatChapterNumber(latestChapter));
     }
 
-    status = formatStatus(item && item.status);
-    return status.length > 0 ? status : void 0;
+    if (updateLabel.length > 0) {
+      parts.push(updateLabel);
+    }
+    if (year > 0) {
+      parts.push(String(year));
+    }
+    if (status.length > 0) {
+      parts.push(status);
+    }
+
+    return parts.length > 0 ? parts.join(" · ") : void 0;
+  }
+
+  function getSeriesUpdateLabel(item) {
+    var formatted = [
+      item && item.chapterUpdatedAtFormatted,
+      item && item.chapter_updated_at_formatted,
+      item && item.updatedAtFormatted,
+      item && item.updated_at_formatted
+    ];
+    var absolute = [
+      item && item.chapterUpdatedAt,
+      item && item.chapter_updated_at,
+      item && item.updatedAt,
+      item && item.updated_at
+    ];
+    var index;
+    var clean;
+    var date;
+
+    for (index = 0; index < formatted.length; index += 1) {
+      clean = cleanText(formatted[index] || "");
+      if (clean.length > 0) {
+        return clean;
+      }
+    }
+
+    for (index = 0; index < absolute.length; index += 1) {
+      date = parseAbsoluteDate(absolute[index]);
+      if (date) {
+        return date.toISOString().slice(0, 10);
+      }
+    }
+
+    return "";
   }
 
   // Homepage Helpers
@@ -976,7 +2818,104 @@
     });
   }
 
+  function streamHomeSection(sectionCallback, id, title, type, pagedResultsPromise) {
+    return Promise.resolve(pagedResultsPromise).then(function(pagedResults) {
+      var section = createHomeSection(id, title, type, pagedResults);
+
+      if (Array.isArray(section.items) && section.items.length > 0) {
+        sectionCallback(section);
+        return true;
+      }
+      return false;
+    }).catch(function(error) {
+      if (isCloudflareBypassError(error)) {
+        throw error;
+      }
+      if (typeof console !== "undefined" && console && typeof console.warn === "function") {
+        console.warn("[ComixTo] Home section " + id + " failed: " + String(error));
+      }
+      // Keep other Discover sections usable when one endpoint is slow or fails.
+      return false;
+    });
+  }
+
+  function isCloudflareBypassError(error) {
+    return cleanText(error && error.message || error || "").toLowerCase().indexOf("cloudflare bypass required") >= 0;
+  }
+
   // Search / Filter Helpers
+
+  function buildHiddenTermOptions(filterData) {
+    var options = [];
+    var seen = {};
+
+    function addOptions(prefix, labelPrefix, values) {
+      normalizeFilterOptions(values).forEach(function(option) {
+        var id = prefix + option.id;
+        if (seen[id]) {
+          return;
+        }
+        seen[id] = true;
+        options.push({
+          id: id,
+          label: labelPrefix + ": " + option.label
+        });
+      });
+    }
+
+    addOptions(TAG_PREFIX_GENRE, "Genre", filterData && filterData.genres);
+    addOptions(TAG_PREFIX_FORMAT, "Format", filterData && filterData.formats);
+    addOptions(TAG_PREFIX_THEME, "Tag", filterData && filterData.themes);
+    return options;
+  }
+
+  function appendSavedTermOptions(options, savedValues) {
+    var result = Array.isArray(options) ? options.slice() : [];
+    var seen = {};
+
+    result.forEach(function(option) {
+      seen[String(option.id)] = true;
+    });
+    normalizeHiddenTermValues(savedValues).forEach(function(value) {
+      if (seen[value]) {
+        return;
+      }
+      seen[value] = true;
+      result.push({
+        id: value,
+        label: "Saved unavailable term: " + value
+      });
+    });
+
+    return result;
+  }
+
+  function normalizeHiddenTermValues(value) {
+    var values = Array.isArray(value) ? value : normalizeArray(value);
+    var selected = [];
+
+    values.forEach(function(entry) {
+      var clean = cleanText(entry || "");
+      if ((clean.indexOf(TAG_PREFIX_GENRE) === 0 || clean.indexOf(TAG_PREFIX_FORMAT) === 0 || clean.indexOf(TAG_PREFIX_THEME) === 0) && selected.indexOf(clean) < 0) {
+        selected.push(clean);
+      }
+    });
+
+    return selected;
+  }
+
+  function getHiddenTermIds(values) {
+    var ids = [];
+
+    normalizeHiddenTermValues(values).forEach(function(value) {
+      var id = value.replace(/^(genre:|format:|theme:)/, "");
+      if (id.length > 0) {
+        pushUnique(ids, id);
+      }
+    });
+
+    return ids;
+  }
 
   function buildSearchTagSections(filterData) {
     var sections = [];
@@ -984,6 +2923,7 @@
     var demographics = normalizeFilterOptions(filterData && filterData.demographics);
     var formats = normalizeFilterOptions(filterData && filterData.formats);
     var themes = normalizeFilterOptions(filterData && filterData.themes);
+    var years = normalizeFilterOptions(filterData && filterData.years);
     var statuses = normalizeFilterOptions(filterData && filterData.statuses);
     var types = normalizeFilterOptions(filterData && filterData.types);
     var sorts = normalizeFilterOptions(filterData && filterData.sorts);
@@ -1006,6 +2946,7 @@
       ]
     }));
     pushSearchTagSection(sections, "demographics", "Demographics", TAG_PREFIX_DEMOGRAPHIC, demographics);
+    pushSearchTagSection(sections, "years", "Release Year", TAG_PREFIX_YEAR, years);
     pushSearchTagSection(sections, "statuses", "Status", TAG_PREFIX_STATUS, statuses);
     pushSearchTagSection(sections, "types", "Type", TAG_PREFIX_TYPE, types);
     pushSearchTagSection(sections, "sorts", "Sort", TAG_PREFIX_SORT, sorts);
@@ -1073,7 +3014,12 @@
       artists: [],
       sort: void 0,
       genresMode: "and",
-      minChapters: extractMinimumChaptersFilterValue(query)
+      authorNames: extractSearchFieldValue(query, SEARCH_FIELD_AUTHOR),
+      artistNames: extractSearchFieldValue(query, SEARCH_FIELD_ARTIST),
+      tagNames: extractSearchFieldValue(query, SEARCH_FIELD_TAGS),
+      minChapters: extractPositiveIntegerSearchFieldValue(query, SEARCH_FIELD_MIN_CHAPTERS, "Minimum Chapters"),
+      yearFrom: extractReleaseYearSearchFieldValue(query, SEARCH_FIELD_YEAR_FROM, "Release Year From"),
+      yearTo: extractReleaseYearSearchFieldValue(query, SEARCH_FIELD_YEAR_TO, "Release Year To")
     };
     var includedTags = Array.isArray(query && query.includedTags) ? query.includedTags : [];
     var excludedTags = Array.isArray(query && query.excludedTags) ? query.excludedTags : [];
@@ -1111,10 +3057,24 @@
         pushUnique(filters.types, value);
       } else if (tagId.indexOf(TAG_PREFIX_AUTHOR) === 0) {
         value = tagId.slice(TAG_PREFIX_AUTHOR.length);
-        pushUnique(filters.authors, value);
+        if (/^\d+$/.test(value)) {
+          pushUnique(filters.authors, value);
+        } else {
+          filters.authorNames = appendCommaSeparatedValue(filters.authorNames, stripTagLabelPrefix(tag && tag.label, "Author") || value);
+        }
       } else if (tagId.indexOf(TAG_PREFIX_ARTIST) === 0) {
         value = tagId.slice(TAG_PREFIX_ARTIST.length);
-        pushUnique(filters.artists, value);
+        if (/^\d+$/.test(value)) {
+          pushUnique(filters.artists, value);
+        } else {
+          filters.artistNames = appendCommaSeparatedValue(filters.artistNames, stripTagLabelPrefix(tag && tag.label, "Artist") || value);
+        }
+      } else if (tagId.indexOf(TAG_PREFIX_YEAR) === 0) {
+        value = toPositiveInteger(tagId.slice(TAG_PREFIX_YEAR.length), 0);
+        if (value >= OLDEST_RELEASE_YEAR && value <= 9999) {
+          filters.yearFrom = value;
+          filters.yearTo = value;
+        }
       } else if (tagId.indexOf(TAG_PREFIX_SORT) === 0 && filters.sort === void 0) {
         filters.sort = tagId.slice(TAG_PREFIX_SORT.length);
       }
@@ -1138,21 +3098,25 @@
       // because the Comix browse API does not honor *_ex params for them.
     });
 
+    if (filters.yearFrom !== void 0 && filters.yearTo !== void 0 && filters.yearFrom > filters.yearTo) {
+      throw new Error("Release Year From cannot be greater than Release Year To.");
+    }
+
     return filters;
   }
 
-  function createMinimumChaptersSearchField() {
+  function createSearchField(id, name, placeholder) {
     var field = {
-      id: SEARCH_FIELD_MIN_CHAPTERS,
-      name: "Minimum Chapters",
-      placeholder: "e.g. 10"
+      id: id,
+      name: name,
+      placeholder: placeholder
     };
     return typeof App !== "undefined" && App && typeof App.createSearchField === "function" ? App.createSearchField(field) : field;
   }
 
-  function extractMinimumChaptersFilterValue(query) {
+  function extractSearchFieldValue(query, fieldId) {
     var parameters = isObject(query && query.parameters) ? query.parameters : {};
-    var values = Array.isArray(parameters[SEARCH_FIELD_MIN_CHAPTERS]) ? parameters[SEARCH_FIELD_MIN_CHAPTERS] : [];
+    var values = Array.isArray(parameters[fieldId]) ? parameters[fieldId] : [];
     var rawValue = "";
 
     for (var index = 0; index < values.length; index += 1) {
@@ -1162,19 +3126,85 @@
       }
     }
 
+    return rawValue;
+  }
+
+  function splitCommaSeparatedValues(value) {
+    var seen = {};
+    var values = [];
+
+    String(value || "").split(",").forEach(function(part) {
+      var clean = cleanText(part);
+      var key = clean.toLowerCase();
+
+      if (clean.length > 0 && !seen[key]) {
+        seen[key] = true;
+        values.push(clean);
+      }
+    });
+
+    return values;
+  }
+
+  function normalizeSearchText(value) {
+    return cleanText(value || "")
+      .replace(/[\u2018\u2019\u201A\u201B\u2032\u2035]/g, "'")
+      .replace(/[\u201C\u201D\u201E\u201F\u2033\u2036]/g, '"');
+  }
+
+  function appendCommaSeparatedValue(existing, value) {
+    var clean = cleanText(value || "");
+
+    if (clean.length === 0) {
+      return existing;
+    }
+
+    return cleanText(existing || "").length > 0 ? existing + "," + clean : clean;
+  }
+
+  function stripTagLabelPrefix(value, prefix) {
+    var clean = cleanText(value || "");
+    var marker = String(prefix || "") + ":";
+
+    return clean.toLowerCase().indexOf(marker.toLowerCase()) === 0 ? clean.slice(marker.length).trim() : clean;
+  }
+
+  function extractPositiveIntegerSearchFieldValue(query, fieldId, label) {
+    var rawValue = extractSearchFieldValue(query, fieldId);
+    var value;
+
     if (rawValue.length === 0) {
       return void 0;
     }
     if (!/^\d+$/.test(rawValue)) {
-      throw new Error("Minimum Chapters must be a positive whole number.");
+      throw new Error(label + " must be a positive whole number.");
     }
 
-    var minChapters = parseInt(rawValue, 10);
-    if (!isFinite(minChapters) || minChapters <= 0) {
-      throw new Error("Minimum Chapters must be a positive whole number.");
+    value = parseInt(rawValue, 10);
+    if (!isFinite(value) || value <= 0) {
+      throw new Error(label + " must be a positive whole number.");
     }
 
-    return minChapters;
+    return value;
+  }
+
+  function extractReleaseYearSearchFieldValue(query, fieldId, label) {
+    var rawValue = extractSearchFieldValue(query, fieldId);
+    var year;
+
+    if (rawValue.length === 0) {
+      return void 0;
+    }
+    if (!/^\d{4}$/.test(rawValue)) {
+      throw new Error(label + " must be a four-digit year.");
+    }
+
+    year = parseInt(rawValue, 10);
+    if (!isFinite(year) || year < OLDEST_RELEASE_YEAR || year > 9999) {
+      throw new Error(label + " must be between " + OLDEST_RELEASE_YEAR + " and 9999.");
+    }
+
+    return year;
   }
 
   function parseSortOption(value) {
@@ -1193,7 +3223,23 @@
 
     Object.keys(fetched || {}).forEach(function(key) {
       if (Array.isArray(fetched[key]) && fetched[key].length > 0) {
-        merged[key] = fetched[key];
+        var liveOptions = normalizeFilterOptions(fetched[key]);
+
+        if (key === "sorts") {
+          var seen = {};
+          liveOptions.forEach(function(option) {
+            seen[String(option.id).toLowerCase()] = true;
+          });
+          normalizeFilterOptions(fallback && fallback[key]).forEach(function(option) {
+            var id = String(option.id).toLowerCase();
+            if (!seen[id]) {
+              seen[id] = true;
+              liveOptions.push(option);
+            }
+          });
+        }
+
+        merged[key] = liveOptions;
       }
     });
 
@@ -1251,6 +3297,11 @@
 
     pushPrefixedMetadataTag(metadataTags, TAG_PREFIX_TYPE, details.type, "Type", formatType(details.type));
     pushPrefixedMetadataTag(metadataTags, TAG_PREFIX_STATUS, details.status, "Status", formatStatus(details.status));
+    pushReleaseYearMetadataTag(metadataTags, details.year);
+    pushMetadataTag(metadataTags, "language", "Language", details.originalLanguage || details.original_language);
+    pushMetadataTag(metadataTags, "content-rating", "Content Rating", formatOptionLabel(details.contentRating || details.content_rating));
+    pushMetadataTag(metadataTags, "rated-by", "Rated By", formatPositiveCount(details.ratedCount || details.rated_count || details.ratingCount || details.rating_count));
+    pushMetadataTag(metadataTags, "followers", "Followers", formatPositiveCount(details.followsTotal || details.follows_total));
 
     if (genreTags.length > 0) {
       sections.push(App.createTagSection({
@@ -1363,6 +3414,31 @@
     }
   }
 
+  function pushReleaseYearMetadataTag(tags, value) {
+    var year = toPositiveInteger(value, 0);
+
+    if (year >= OLDEST_RELEASE_YEAR && year <= 9999) {
+      tags.push(createPrefixedTag(TAG_PREFIX_YEAR, String(year), "Year: " + year));
+    }
+  }
+
+  function pushMetadataTag(tags, id, label, value) {
+    var clean = cleanText(value || "");
+
+    if (clean.length > 0) {
+      tags.push(App.createTag({
+        id: "metadata:" + id + ":" + clean.toLowerCase(),
+        label: label + ": " + clean
+      }));
+    }
+  }
+
+  function formatPositiveCount(value) {
+    var count = toNumber(value, NaN);
+
+    return isFinite(count) && count > 0 ? String(Math.floor(count)) : "";
+  }
+
   function isExplicitSeries(details) {
     details = details || {};
 
@@ -1439,14 +3515,17 @@
 
   function buildChapterName(chapter, chapterNumber) {
     var rawName = cleanText(chapter.name || chapter.title || "");
+    var volume = cleanText(chapter && chapter.volume !== void 0 && chapter.volume !== null ? chapter.volume : "");
+    var chapterLabel;
     var prefix;
 
     if (!isFinite(chapterNumber) || chapterNumber <= 0) {
       return rawName.length > 0 ? rawName : "Chapter";
     }
 
-    prefix = "Chapter " + formatChapterNumber(chapterNumber);
-    if (rawName.length === 0 || rawName.toLowerCase() === prefix.toLowerCase()) {
+    chapterLabel = "Chapter " + formatChapterNumber(chapterNumber);
+    prefix = (volume.length > 0 ? "Vol. " + volume + " · " : "") + chapterLabel;
+    if (rawName.length === 0 || rawName.toLowerCase() === chapterLabel.toLowerCase() || rawName.toLowerCase() === prefix.toLowerCase()) {
       return prefix;
     }
 
@@ -1455,6 +3534,127 @@
 
   function compareChaptersDesc(a, b) {
     return toNumber(b && b.number, 0) - toNumber(a && a.number, 0);
+  }
+
+  function createChapterListParams(page, settings) {
+    var params = {
+      page: page,
+      limit: CHAPTERS_PAGE_SIZE,
+      order: { number: "desc" }
+    };
+    var groupId = getServerChapterGroupId(settings);
+
+    if (groupId.length > 0) {
+      params.scanlation_group_id = groupId;
+    }
+
+    return params;
+  }
+
+  function getServerChapterGroupId(settings) {
+    var tokens = settings && Array.isArray(settings.tokens) ? settings.tokens : [];
+
+    if (settings && settings.mode === GROUP_MODE_ONLY && tokens.length === 1 && /^\d+$/.test(tokens[0])) {
+      return tokens[0];
+    }
+
+    return "";
+  }
+
+  function getChapterPageFetchLimit(firstPage) {
+    var lastPage = getResultLastPage(firstPage);
+    var items = Array.isArray(firstPage && firstPage.items) ? firstPage.items : [];
+
+    if (lastPage > 1) {
+      if (lastPage > MAX_CHAPTER_PAGES) {
+        throw new Error("ComixTo reported " + lastPage + " chapter pages, above the safety limit of " + MAX_CHAPTER_PAGES + ". Refusing to return a truncated chapter list.");
+      }
+      return lastPage;
+    }
+
+    return getNextPageMetadata(firstPage, 1, items, CHAPTERS_PAGE_SIZE) ? MAX_CHAPTER_PAGES : 1;
+  }
+
+  function hasExplicitChapterLastPage(result) {
+    var meta = result && (isObject(result.meta) ? result.meta : result.pagination);
+
+    return firstPositiveInteger([meta && meta.lastPage, meta && meta.last_page]) > 1;
+  }
+
+  function rememberChapterPageItems(result, seen) {
+    var items = Array.isArray(result && result.items) ? result.items : [];
+    var added = 0;
+
+    items.forEach(function(item, index) {
+      var id = getChapterId(item);
+      var number = item && item.number !== void 0 && item.number !== null ? String(item.number) : "";
+      var url = cleanText(item && item.url || "");
+      var key = id.length > 0 ? "id:" + id : number.length > 0 || url.length > 0 ? "fallback:" + number + "|" + url : "page-item:" + index + "|" + JSON.stringify(item || {});
+
+      if (!seen[key]) {
+        seen[key] = true;
+        added += 1;
+      }
+    });
+
+    return added;
+  }
+
+  function shouldStopChapterPaging(result, page) {
+    var items = Array.isArray(result && result.items) ? result.items : [];
+    var meta = result && (isObject(result.meta) ? result.meta : result.pagination);
+    var hasNext;
+    var lastPage;
+
+    if (items.length === 0) {
+      return true;
+    }
+
+    if (isObject(meta)) {
+      hasNext = meta.hasNext;
+      if (hasNext === void 0) {
+        hasNext = meta.has_next;
+      }
+      if (hasNext === false) {
+        return true;
+      }
+      if (hasNext === true) {
+        return false;
+      }
+
+      lastPage = firstPositiveInteger([meta.lastPage, meta.last_page]);
+      if (lastPage > 0 && page >= lastPage) {
+        return true;
+      }
+    }
+
+    return items.length < CHAPTERS_PAGE_SIZE;
+  }
+
+  function isCompleteChapterPage(result) {
+    var meta = result && (isObject(result.meta) ? result.meta : result.pagination);
+    var hasNext;
+    var page;
+    var lastPage;
+
+    if (!isObject(meta)) {
+      return false;
+    }
+
+    hasNext = meta.hasNext;
+    if (hasNext === void 0) {
+      hasNext = meta.has_next;
+    }
+    if (hasNext === false) {
+      return true;
+    }
+    if (hasNext === true) {
+      return false;
+    }
+
+    page = firstPositiveInteger([meta.page, meta.currentPage, meta.current_page]);
+    lastPage = firstPositiveInteger([meta.lastPage, meta.last_page]);
+    return page > 0 && lastPage > 0 && page >= lastPage;
   }
 
   function normalizeChapterPages(pages) {
@@ -1481,19 +3681,22 @@
     }
 
     if (url.indexOf("//") === 0) {
-      return normalizeReadableChapterImageUrl("https:" + url);
+      url = "https:" + url;
+      return normalizeReadableChapterImageUrl(url);
     }
 
     if (baseUrl.length === 0) {
       return normalizeReadableChapterImageUrl(url);
     }
 
-    return normalizeReadableChapterImageUrl(baseUrl.replace(/\/+$/, "") + "/" + url.replace(/^\/+/, ""));
+    url = baseUrl.replace(/\/+$/, "") + "/" + url.replace(/^\/+/, "");
+    return normalizeReadableChapterImageUrl(url);
   }
 
   function normalizeReadableChapterImageUrl(url) {
-    // Current /i/ variants often return 404 HTML. Keep raw /si/ transport.
-    // API pages with s:1 remain visually scrambled until an external descrambler exists.
+    // Keep the API-provided image path. The request interceptor removes headers
+    // current Comix image hosts reject and decodes supported encrypted/scrambled
+    // responses from the response headers instead of guessing CDN path variants.
     return url;
   }
 
@@ -1518,6 +3721,7 @@
   function applyChapterGroupSettings(chapters, settings) {
     var mode = settings && settings.mode || GROUP_MODE_ALL;
     var tokens = settings && Array.isArray(settings.tokens) ? settings.tokens : [];
+    var matchMode = settings && settings.matchMode || GROUP_MATCH_EXACT;
 
     if (tokens.length === 0 || mode === GROUP_MODE_ALL) {
       return chapters;
@@ -1525,18 +3729,18 @@
 
     if (mode === GROUP_MODE_HIDE) {
       return chapters.filter(function(chapter) {
-        return !chapterMatchesGroupTokens(chapter, tokens);
+        return !chapterMatchesGroupTokens(chapter, tokens, matchMode);
       });
     }
 
     if (mode === GROUP_MODE_ONLY) {
       return chapters.filter(function(chapter) {
-        return chapterMatchesGroupTokens(chapter, tokens);
+        return chapterMatchesGroupTokens(chapter, tokens, matchMode);
       });
     }
 
     if (mode === GROUP_MODE_PREFER) {
-      return collapseDuplicateChapterGroups(chapters, tokens);
+      return collapseDuplicateChapterGroups(chapters, tokens, matchMode);
     }
 
     return chapters;
@@ -1549,7 +3753,7 @@
       settings.tokens.length > 0;
   }
 
-  function collapseDuplicateChapterGroups(chapters, tokens) {
+  function collapseDuplicateChapterGroups(chapters, tokens, matchMode) {
     var grouped = {};
     var order = [];
     var output = [];
@@ -1571,18 +3775,18 @@
     });
 
     order.forEach(function(key) {
-      output.push(selectPreferredChapter(grouped[key], tokens));
+      output.push(selectPreferredChapter(grouped[key], tokens, matchMode));
     });
 
     return output;
   }
 
-  function selectPreferredChapter(chapters, tokens) {
+  function selectPreferredChapter(chapters, tokens, matchMode) {
     var selected = chapters[0];
-    var selectedIndex = getGroupTokenIndex(selected, tokens);
+    var selectedIndex = getGroupTokenIndex(selected, tokens, matchMode);
 
     chapters.forEach(function(chapter) {
-      var tokenIndex = getGroupTokenIndex(chapter, tokens);
+      var tokenIndex = getGroupTokenIndex(chapter, tokens, matchMode);
 
       if (tokenIndex >= 0 && (selectedIndex < 0 || tokenIndex < selectedIndex)) {
         selected = chapter;
@@ -1605,7 +3809,7 @@
     var tokens = [];
 
     String(value || "").split(",").forEach(function(part) {
-      var token = cleanText(part).toLowerCase();
+      var token = normalizeGroupMatchText(part);
       if (token.length > 0 && !seen[token]) {
         seen[token] = true;
         tokens.push(token);
@@ -1615,21 +3819,29 @@
     return tokens;
   }
 
-  function chapterMatchesGroupTokens(chapter, tokens) {
-    return getGroupTokenIndex(chapter, tokens) >= 0;
+  function chapterMatchesGroupTokens(chapter, tokens, matchMode) {
+    return getGroupTokenIndex(chapter, tokens, matchMode) >= 0;
   }
 
-  function getGroupTokenIndex(chapter, tokens) {
-    var groupId = getChapterGroupId(chapter).toLowerCase();
-    var groupName = getChapterGroupName(chapter).toLowerCase();
+  function getGroupTokenIndex(chapter, tokens, matchMode) {
+    var groupId = cleanText(getChapterGroupId(chapter)).toLowerCase();
+    var groupName = normalizeGroupMatchText(getChapterGroupName(chapter));
+    var allowContains = matchMode === GROUP_MATCH_CONTAINS;
 
     for (var index = 0; index < tokens.length; index += 1) {
-      if (tokens[index] === groupId || tokens[index] === groupName) {
+      if (tokens[index] === groupId || tokens[index] === groupName || (allowContains && groupName.indexOf(tokens[index]) >= 0)) {
         return index;
       }
     }
 
     return -1;
+  }
+
+  function normalizeGroupMatchText(value) {
+    return cleanText(value || "")
+      .replace(/[\u2018\u2019\u201A\u201B\u2032\u2035]/g, "'")
+      .replace(/[\u201C\u201D\u201E\u201F\u2033\u2036]/g, '"')
+      .toLowerCase();
   }
 
   function getChapterGroupId(chapter) {
@@ -1662,11 +3874,49 @@
 
   function cacheChapterShareUrl(source, chapterId, url) {
     var cleanId = cleanText(chapterId || "");
-    var cleanUrl = cleanText(url || "");
+    var cleanUrl = normalizeChapterShareUrl(url);
+    var existingIndex;
 
     if (cleanId.length > 0 && cleanUrl.indexOf(DOMAIN + "/title/") === 0) {
+      existingIndex = source.cachedChapterShareUrlOrder.indexOf(cleanId);
+      if (existingIndex >= 0) {
+        source.cachedChapterShareUrlOrder.splice(existingIndex, 1);
+      }
       source.cachedChapterShareUrls[cleanId] = cleanUrl;
+      source.cachedChapterShareUrlOrder.push(cleanId);
+
+      while (source.cachedChapterShareUrlOrder.length > CHAPTER_SHARE_URL_CACHE_SIZE) {
+        delete source.cachedChapterShareUrls[source.cachedChapterShareUrlOrder.shift()];
+      }
     }
+  }
+
+  function getCachedChapterShareUrl(source, chapterId) {
+    var cleanId = cleanText(chapterId || "");
+    var url = cleanText(source && source.cachedChapterShareUrls && source.cachedChapterShareUrls[cleanId] || "");
+
+    if (url.length > 0 && source && Array.isArray(source.cachedChapterShareUrlOrder)) {
+      removeArrayValue(source.cachedChapterShareUrlOrder, cleanId);
+      source.cachedChapterShareUrlOrder.push(cleanId);
+    }
+
+    return url;
+  }
+
+  function normalizeChapterShareUrl(url) {
+    var cleanUrl = cleanText(url || "");
+
+    if (cleanUrl.indexOf(DOMAIN + "/title/") === 0) {
+      return cleanUrl;
+    }
+    if (cleanUrl.indexOf("/title/") === 0) {
+      return DOMAIN + cleanUrl;
+    }
+    if (cleanUrl.indexOf("title/") === 0) {
+      return DOMAIN + "/" + cleanUrl;
+    }
+
+    return "";
   }
 
   function flatten(arrays) {
@@ -1720,7 +3970,7 @@
       return new Date(fallback.date.getTime());
     }
 
-    return createUnknownChapterDate(fetchedAt);
+    return createUnknownChapterDate();
   }
 
   function getOwnChapterDate(chapter, fetchedAt) {
@@ -1791,8 +4041,8 @@
     return null;
   }
 
-  function createUnknownChapterDate(fetchedAt) {
-    return new Date(fetchedAt);
+  function createUnknownChapterDate() {
+    return new Date(0);
   }
 
   function parseRelativeChapterDate(values, fetchedAt) {
@@ -1905,6 +4155,30 @@
 
   // Source Settings Helpers
 
+  async function resetSourceSettings(stateManager) {
+    var keys = [
+      STATE_CONTENT_RATING,
+      STATE_LATEST_UPDATES_VIEW,
+      STATE_TRENDING_RANGE,
+      STATE_MOST_FOLLOWED_RANGE,
+      STATE_HOME_DEMOGRAPHICS,
+      STATE_HOME_TYPES,
+      STATE_EXTRA_HOME_SECTIONS,
+      STATE_HIDDEN_TERMS,
+      STATE_REQUIRED_TERMS,
+      STATE_REQUIRED_TERMS_MODE,
+      STATE_CHAPTER_GROUP_MODE,
+      STATE_CHAPTER_GROUP_MATCH,
+      STATE_CHAPTER_GROUP_FILTER,
+      STATE_FILTER_CACHE,
+      STATE_FILTER_CACHE_LEGACY
+    ];
+
+    for (var index = 0; index < keys.length; index += 1) {
+      await stateManager.store(keys[index], null);
+    }
+  }
+
   function createSingleSelectSetting(stateManager, config) {
     return App.createDUISelect({
       id: config.id,
@@ -1945,6 +4219,26 @@
     });
   }
 
+  function createOptionalMultiSelectSetting(stateManager, config) {
+    return App.createDUISelect({
+      id: config.id,
+      label: config.label,
+      options: getOptionIds(config.options),
+      allowsMultiselect: true,
+      labelResolver: async function(value) {
+        return getOptionLabel(value, config.options, value);
+      },
+      value: App.createDUIBinding({
+        get: async function() {
+          return config.getValue(stateManager);
+        },
+        set: async function(newValue) {
+          await stateManager.store(config.id, normalizeOptionalMultiOptionValues(newValue, config.options));
+        }
+      })
+    });
+  }
+
   function getOptionIds(options) {
     return options.map(function(option) {
       return option.id;
@@ -1953,6 +4247,20 @@
 
   async function getContentRating(stateManager) {
     return normalizeOptionValue(await stateManager.retrieve(STATE_CONTENT_RATING), CONTENT_RATING_OPTIONS, CONTENT_RATING_DEFAULT);
+  }
+
+  function getContentRatingsUpTo(value) {
+    var selected = normalizeOptionValue(value, CONTENT_RATING_OPTIONS, CONTENT_RATING_DEFAULT);
+    var ratings = [];
+
+    for (var index = 0; index < CONTENT_RATING_OPTIONS.length; index += 1) {
+      ratings.push(CONTENT_RATING_OPTIONS[index].id);
+      if (CONTENT_RATING_OPTIONS[index].id === selected) {
+        break;
+      }
+    }
+
+    return ratings;
   }
 
   async function getLatestUpdatesView(stateManager) {
@@ -1975,12 +4283,41 @@
     return normalizeMultiOptionValues(await stateManager.retrieve(STATE_HOME_TYPES), HOME_TYPE_OPTIONS);
   }
 
+  async function getExtraHomeSections(stateManager) {
+    return normalizeOptionalMultiOptionValues(await stateManager.retrieve(STATE_EXTRA_HOME_SECTIONS), EXTRA_HOME_SECTION_OPTIONS);
+  }
+
+  async function getHiddenTerms(stateManager) {
+    return normalizeHiddenTermValues(await stateManager.retrieve(STATE_HIDDEN_TERMS));
+  }
+
+  async function getRequiredTerms(stateManager) {
+    return normalizeHiddenTermValues(await stateManager.retrieve(STATE_REQUIRED_TERMS));
+  }
+
+  async function getRequiredTermsMode(stateManager) {
+    return normalizeOptionValue(await stateManager.retrieve(STATE_REQUIRED_TERMS_MODE), REQUIRED_TERM_MODE_OPTIONS, "and");
+  }
+
   async function getHomeFilterParams(stateManager) {
-    var contentRating = await getContentRating(stateManager);
-    var demographics = await getHomeDemographics(stateManager);
-    var types = await getHomeTypes(stateManager);
+    var values = await Promise.all([
+      getContentRating(stateManager),
+      getHomeDemographics(stateManager),
+      getHomeTypes(stateManager),
+      getHiddenTerms(stateManager),
+      getRequiredTerms(stateManager),
+      getRequiredTermsMode(stateManager)
+    ]);
+    var contentRating = values[0];
+    var demographics = values[1];
+    var types = values[2];
+    var hiddenTerms = getHiddenTermIds(values[3]);
+    var requiredTerms = getHiddenTermIds(values[4]);
+    hiddenTerms = hiddenTerms.filter(function(id) {
+      return requiredTerms.indexOf(id) < 0;
+    });
     var params = {
-      content_rating: contentRating
+      content_rating: getContentRatingsUpTo(contentRating)
     };
 
     if (demographics.length > 0 && demographics.length < HOME_DEMOGRAPHIC_OPTIONS.length) {
@@ -1991,6 +4328,15 @@
 
     if (types.length > 0 && types.length < HOME_TYPE_OPTIONS.length) {
       params.types = types;
+    }
+
+    if (hiddenTerms.length > 0) {
+      params.genres_ex = hiddenTerms;
+    }
+
+    if (requiredTerms.length > 0) {
+      params.genres_in = requiredTerms;
+      params.genres_mode = values[5];
     }
 
     return params;
@@ -2008,14 +4354,25 @@
     return normalizeGroupMode(await stateManager.retrieve(STATE_CHAPTER_GROUP_MODE));
   }
 
+  async function getChapterGroupMatchMode(stateManager) {
+    return normalizeOptionValue(await stateManager.retrieve(STATE_CHAPTER_GROUP_MATCH), GROUP_MATCH_OPTIONS, GROUP_MATCH_EXACT);
+  }
+
   async function getChapterGroupFilterText(stateManager) {
     return cleanText(await stateManager.retrieve(STATE_CHAPTER_GROUP_FILTER) || "");
   }
 
   async function getChapterGroupSettings(stateManager) {
+    var values = await Promise.all([
+      getChapterGroupMode(stateManager),
+      getChapterGroupFilterText(stateManager),
+      getChapterGroupMatchMode(stateManager)
+    ]);
+
     return {
-      mode: await getChapterGroupMode(stateManager),
-      tokens: parseGroupFilterTokens(await getChapterGroupFilterText(stateManager))
+      mode: values[0],
+      tokens: parseGroupFilterTokens(values[1]),
+      matchMode: values[2]
     };
   }
 
@@ -2054,6 +4411,26 @@
     });
   }
 
+  function normalizeOptionalMultiOptionValues(value, options) {
+    var values = Array.isArray(value) ? value : normalizeArray(value);
+    var validIds = {};
+    var selected = [];
+
+    options.forEach(function(option) {
+      validIds[String(option.id).toLowerCase()] = option.id;
+    });
+
+    values.forEach(function(entry) {
+      var normalized = cleanText(entry || "").toLowerCase();
+      var id = validIds[normalized];
+      if (id && selected.indexOf(id) < 0) {
+        selected.push(id);
+      }
+    });
+
+    return selected;
+  }
+
   function getOptionLabel(value, options, fallback) {
     var normalized = normalizeOptionValue(value, options, fallback);
 
@@ -2073,22 +4450,7 @@
   }
 
   function buildSignedApiUrl(path, params) {
-    var signedParams = Object.assign({}, params || {});
-
-    if (requiresComixHash(path)) {
-      signedParams._ = generateComixHash(path);
-    }
-
-    return buildApiUrl(path, signedParams);
-  }
-
-  function requiresComixHash(path) {
-    var normalizedPath = normalizeComixHashPath(path);
-
-    // The live API rejects unsigned chapter lists, chapter indexes, and chapter detail requests.
-    return /^\/manga\/[^/]+\/chapters$/.test(normalizedPath) ||
-      /^\/manga\/[^/]+\/chapter-indexes$/.test(normalizedPath) ||
-      /^\/chapters\/[^/]+$/.test(normalizedPath);
+    return buildApiUrl(path, params);
   }
 
   function buildQueryString(params) {
@@ -2124,7 +4486,7 @@
   }
 
   function getNextPageMetadata(result, page, items, pageSize) {
-    var meta = result && result.meta;
+    var meta = result && (isObject(result.meta) ? result.meta : result.pagination);
     var currentPage = toPositiveInteger(page, 1);
     var hasNext;
     var lastPage;
@@ -2162,6 +4524,19 @@
     }
 
     return void 0;
+  }
+
+  function getResultLastPage(result) {
+    var meta = result && result.meta;
+    var pagination = result && result.pagination;
+    var lastPage = firstPositiveInteger([
+      meta && meta.lastPage,
+      meta && meta.last_page,
+      pagination && pagination.lastPage,
+      pagination && pagination.last_page
+    ]);
+
+    return lastPage > 0 ? lastPage : 1;
   }
 
   function firstPositiveInteger(values) {
@@ -2292,102 +4667,6 @@
     return value !== null && typeof value === "object" && !Array.isArray(value);
   }
 
-  // Comix Request Signing
-
-  function normalizeComixHashPath(path) {
-    return String(path || "").replace(/^https?:\/\/[^/]+/, "").split("?")[0].replace(/^\/api\/v1(?=\/|$)/, "");
-  }
-
-  function generateComixHash(path) {
-    var normalizedPath = normalizeComixHashPath(path);
-    var data = stringToUtf8Bytes(normalizedPath);
-    var stages = getComixCipherStages();
-
-    data = applyComixInverseCipherStage(data, stages[2]);
-    data = applyComixInverseCipherStage(data, stages[1]);
-    data = applyComixInverseCipherStage(data, stages[0]);
-
-    return b64UrlEncode(data);
-  }
-
-  function decryptComixEnvelope(value) {
-    var data = b64UrlDecode(value);
-    var stages = getComixCipherStages();
-
-    data = applyComixForwardCipherStage(data, stages[0]);
-    data = applyComixForwardCipherStage(data, stages[1]);
-    data = applyComixForwardCipherStage(data, stages[2]);
-
-    return utf8BytesToString(data);
-  }
-
-  function getComixCipherStages() {
-    var stages = [];
-    var index;
-    var stage;
-    var table;
-    var inverseTable;
-    var tableIndex;
-
-    if (decodedComixCipherStages !== null) {
-      return decodedComixCipherStages;
-    }
-
-    for (index = 0; index < COMIX_CIPHER_STAGES.length; index += 1) {
-      stage = COMIX_CIPHER_STAGES[index];
-      table = b64Decode(stage.table);
-      inverseTable = [];
-
-      for (tableIndex = 0; tableIndex < table.length; tableIndex += 1) {
-        inverseTable[table[tableIndex] & 255] = tableIndex & 255;
-      }
-
-      stages.push({
-        table: table,
-        inverseTable: inverseTable,
-        key: b64Decode(stage.key),
-        seed: stage.seed & 255
-      });
-    }
-
-    decodedComixCipherStages = stages;
-    return decodedComixCipherStages;
-  }
-
-  function applyComixForwardCipherStage(data, stage) {
-    var output = [];
-    var index;
-    var input;
-    var keyByte;
-    var previous = stage.seed;
-
-    for (index = 0; index < data.length; index += 1) {
-      input = data[index] & 255;
-      keyByte = stage.key.length > 0 ? stage.key[index % stage.key.length] & 255 : 0;
-      output.push((stage.inverseTable[input] ^ keyByte ^ previous) & 255);
-      previous = input;
-    }
-
-    return output;
-  }
-
-  function applyComixInverseCipherStage(data, stage) {
-    var output = [];
-    var index;
-    var keyByte;
-    var transformed;
-    var previous = stage.seed;
-
-    for (index = 0; index < data.length; index += 1) {
-      keyByte = stage.key.length > 0 ? stage.key[index % stage.key.length] & 255 : 0;
-      transformed = stage.table[(data[index] ^ keyByte ^ previous) & 255] & 255;
-      output.push(transformed);
-      previous = transformed;
-    }
-
-    return output;
-  }
-
   function stringToUtf8Bytes(value) {
     var encoded = encodeURIComponent(value === void 0 || value === null ? "" : String(value));
     var output = [];
@@ -2480,10 +4759,6 @@
     return output;
   }
 
-  function b64UrlDecode(value) {
-    return b64Decode(String(value || "").replace(/-/g, "+").replace(/_/g, "/"));
-  }
-
   function b64UrlEncode(bytes) {
     var output = "";
     var i = 0;
@@ -2509,326 +4784,6 @@
     }
 
     return output.replace(/\+/g, "-").replace(/\//g, "_");
-  }
-
-  function bytesToString(bytes) {
-    var output = "";
-    var index;
-
-    for (index = 0; index < bytes.length; index += 4096) {
-      output += String.fromCharCode.apply(null, bytes.slice(index, index + 4096));
-    }
-
-    return output;
-  }
-
-  function getHashKeyBytes(index) {
-    return b64Decode(COMIX_HASH_KEYS[index] || "");
-  }
-
-  function rc4(key, data) {
-    var s = [];
-    var output = [];
-    var i;
-    var j = 0;
-    var i2 = 0;
-    var j2 = 0;
-    var tmp;
-    var k;
-
-    if (!Array.isArray(key) || key.length === 0) {
-      return data.slice();
-    }
-
-    for (i = 0; i < 256; i += 1) {
-      s[i] = i;
-    }
-
-    for (i = 0; i < 256; i += 1) {
-      j = (j + s[i] + key[i % key.length]) % 256;
-      tmp = s[i];
-      s[i] = s[j];
-      s[j] = tmp;
-    }
-
-    for (k = 0; k < data.length; k += 1) {
-      i2 = (i2 + 1) % 256;
-      j2 = (j2 + s[i2]) % 256;
-      tmp = s[i2];
-      s[i2] = s[j2];
-      s[j2] = tmp;
-      output[k] = data[k] ^ s[(s[i2] + s[j2]) % 256];
-    }
-
-    return output;
-  }
-
-  function getMutKey(mutKey, index) {
-    return mutKey.length > 0 && index % 32 < mutKey.length ? mutKey[index % 32] : 0;
-  }
-
-  function rotL(value, bits) {
-    return (value << bits | value >>> (8 - bits)) & 255;
-  }
-
-  function rotR(value, bits) {
-    return (value >>> bits | value << (8 - bits)) & 255;
-  }
-
-  function addByte(value, amount) {
-    return (value + amount) & 255;
-  }
-
-  function subByte(value, amount) {
-    return (value - amount) & 255;
-  }
-
-  function mutateHashBytes(data, mutKey, prefKey, round) {
-    var output = [];
-    var i;
-    var value;
-
-    for (i = 0; i < data.length; i += 1) {
-      if (i < prefKey.length) {
-        output.push(prefKey[i]);
-      }
-
-      value = data[i] ^ getMutKey(mutKey, i);
-      output.push(transformHashByte(value, i, round));
-    }
-
-    return output;
-  }
-
-  function reverseMutateHashBytes(data, mutKey, prefKey, round) {
-    var output = [];
-    var dataIndex = 0;
-    var outputIndex = 0;
-    var value;
-
-    while (dataIndex < data.length) {
-      if (outputIndex < prefKey.length) {
-        if (data[dataIndex] !== prefKey[outputIndex]) {
-          throw new Error("Invalid encrypted payload prefix.");
-        }
-        dataIndex += 1;
-      }
-
-      if (dataIndex >= data.length) {
-        break;
-      }
-
-      value = inverseTransformHashByte(data[dataIndex], outputIndex, round);
-      output.push((value ^ getMutKey(mutKey, outputIndex)) & 255);
-      dataIndex += 1;
-      outputIndex += 1;
-    }
-
-    return output;
-  }
-
-  function transformHashByte(value, index, round) {
-    switch (round) {
-      case 1:
-        switch (index % 10) {
-          case 0: return addByte(value, 104);
-          case 1:
-          case 6: return value ^ 84;
-          case 2:
-          case 5: return rotL(value, 5);
-          case 3: return addByte(value, 110);
-          case 4: return rotL(value, 1);
-          case 7: return addByte(value, 253);
-          case 8: return rotL(value, 6);
-          case 9: return value ^ 123;
-        }
-        break;
-      case 2:
-        switch (index % 10) {
-          case 0:
-          case 4: return value ^ 84;
-          case 1:
-          case 2:
-          case 3:
-          case 9: return rotL(value, 5);
-          case 5: return value ^ 123;
-          case 6: return addByte(value, 110);
-          case 7: return addByte(value, 165);
-          case 8: return rotL(value, 1);
-        }
-        break;
-      case 3:
-        switch (index % 10) {
-          case 0:
-          case 3:
-          case 8: return rotL(value, 5);
-          case 1:
-          case 5: return rotL(value, 1);
-          case 2: return addByte(value, 104);
-          case 4: return addByte(value, 110);
-          case 6: return addByte(value, 247);
-          case 7: return rotL(value, 6);
-          case 9: return value ^ 123;
-        }
-        break;
-      case 4:
-        switch (index % 10) {
-          case 0:
-          case 2: return value ^ 123;
-          case 1:
-          case 3:
-          case 6: return rotL(value, 1);
-          case 4:
-          case 9: return rotL(value, 5);
-          case 5:
-          case 8: return value ^ 84;
-          case 7: return addByte(value, 165);
-        }
-        break;
-      case 5:
-        switch (index % 10) {
-          case 0:
-          case 7: return value ^ 123;
-          case 1:
-          case 4: return addByte(value, 104);
-          case 2:
-          case 5:
-          case 6:
-          case 8: return rotL(value, 5);
-          case 3: return addByte(value, 247);
-          case 9: return rotL(value, 1);
-        }
-        break;
-    }
-
-    return value & 255;
-  }
-
-  function inverseTransformHashByte(value, index, round) {
-    switch (round) {
-      case 1:
-        switch (index % 10) {
-          case 0: return subByte(value, 104);
-          case 1:
-          case 6: return value ^ 84;
-          case 2:
-          case 5: return rotR(value, 5);
-          case 3: return subByte(value, 110);
-          case 4: return rotR(value, 1);
-          case 7: return subByte(value, 253);
-          case 8: return rotR(value, 6);
-          case 9: return value ^ 123;
-        }
-        break;
-      case 2:
-        switch (index % 10) {
-          case 0:
-          case 4: return value ^ 84;
-          case 1:
-          case 2:
-          case 3:
-          case 9: return rotR(value, 5);
-          case 5: return value ^ 123;
-          case 6: return subByte(value, 110);
-          case 7: return subByte(value, 165);
-          case 8: return rotR(value, 1);
-        }
-        break;
-      case 3:
-        switch (index % 10) {
-          case 0:
-          case 3:
-          case 8: return rotR(value, 5);
-          case 1:
-          case 5: return rotR(value, 1);
-          case 2: return subByte(value, 104);
-          case 4: return subByte(value, 110);
-          case 6: return subByte(value, 247);
-          case 7: return rotR(value, 6);
-          case 9: return value ^ 123;
-        }
-        break;
-      case 4:
-        switch (index % 10) {
-          case 0:
-          case 2: return value ^ 123;
-          case 1:
-          case 3:
-          case 6: return rotR(value, 1);
-          case 4:
-          case 9: return rotR(value, 5);
-          case 5:
-          case 8: return value ^ 84;
-          case 7: return subByte(value, 165);
-        }
-        break;
-      case 5:
-        switch (index % 10) {
-          case 0:
-          case 7: return value ^ 123;
-          case 1:
-          case 4: return subByte(value, 104);
-          case 2:
-          case 5:
-          case 6:
-          case 8: return rotR(value, 5);
-          case 3: return subByte(value, 247);
-          case 9: return rotR(value, 1);
-        }
-        break;
-    }
-
-    return value & 255;
-  }
-
-  function applyComixRound(data, round) {
-    var offset = (round - 1) * 3;
-    return rc4(getHashKeyBytes(offset + 2), mutateHashBytes(data, getHashKeyBytes(offset), getHashKeyBytes(offset + 1), round));
-  }
-
-  function reverseComixRound(data, round) {
-    var offset = (round - 1) * 3;
-    return reverseMutateHashBytes(rc4(getHashKeyBytes(offset + 2), data), getHashKeyBytes(offset), getHashKeyBytes(offset + 1), round);
-  }
-
-  function round1(data) {
-    return applyComixRound(data, 1);
-  }
-
-  function round2(data) {
-    return applyComixRound(data, 2);
-  }
-
-  function round3(data) {
-    return applyComixRound(data, 3);
-  }
-
-  function round4(data) {
-    return applyComixRound(data, 4);
-  }
-
-  function round5(data) {
-    return applyComixRound(data, 5);
-  }
-
-  function reverseRound1(data) {
-    return reverseComixRound(data, 1);
-  }
-
-  function reverseRound2(data) {
-    return reverseComixRound(data, 2);
-  }
-
-  function reverseRound3(data) {
-    return reverseComixRound(data, 3);
-  }
-
-  function reverseRound4(data) {
-    return reverseComixRound(data, 4);
-  }
-
-  function reverseRound5(data) {
-    return reverseComixRound(data, 5);
   }
 
   // Exports
