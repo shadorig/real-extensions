@@ -86,7 +86,7 @@
       "desc": "Extension that pulls series from https://comix.to",
       "website": "https://github.com/shadorig/real-extensions",
       "contentRating": "MATURE",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "icon": "icon.png",
       "tags": [],
       "websiteBaseURL": "https://comix.to",

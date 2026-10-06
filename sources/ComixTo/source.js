@@ -228,7 +228,7 @@
   // Source Info
 
   var ComixToInfo = {
-    version: "1.1.0",
+    version: "1.1.1",
     name: "ComixTo",
     description: "Extension that pulls series from " + DOMAIN,
     author: "real",
@@ -591,7 +591,7 @@
       createSearchField(SEARCH_FIELD_TAGS, "Tags", "comma-separated tags"),
       createSearchField(SEARCH_FIELD_MIN_CHAPTERS, "Minimum Chapters", "e.g. 10"),
       createSearchField(SEARCH_FIELD_YEAR_FROM, "Release Year From", "e.g. 2015"),
-      createSearchField(SEARCH_FIELD_YEAR_TO, "Release Year To", "e.g. 2026")
+      createSearchField(SEARCH_FIELD_YEAR_TO, "Release Year To", "e.g. " + new Date().getUTCFullYear())
     ];
   };
 
@@ -818,9 +818,19 @@
     var tagIds = resolvedSearchInputs[2];
     var hiddenTermIds = getHiddenTermIds(resolvedSearchInputs[3]);
     var requiredTermIds = getHiddenTermIds(resolvedSearchInputs[4]);
+    var localIncludedTermIds = filters.genresIn.slice();
+    var localExcludedTermIds = filters.genresEx.slice();
     var hasLocalIncludedTerms = filters.genresIn.length > 0 || tagIds.length > 0;
+    tagIds.forEach(function(id) {
+      pushUnique(localIncludedTermIds, id);
+    });
+    // Search-local selections are more specific than global defaults. Avoid
+    // emitting the same term in both genres_in and genres_ex when they conflict.
+    requiredTermIds = requiredTermIds.filter(function(id) {
+      return localExcludedTermIds.indexOf(id) < 0;
+    });
     hiddenTermIds = hiddenTermIds.filter(function(id) {
-      return requiredTermIds.indexOf(id) < 0;
+      return requiredTermIds.indexOf(id) < 0 && localIncludedTermIds.indexOf(id) < 0;
     });
     var sort = parseSortOption(filters.sort || (title.length > 0 ? SEARCH_DEFAULT_SORT : DEFAULT_SORT));
     var params = {
@@ -1000,40 +1010,64 @@
     var source = this;
 
     if (cached && cached.data && cached.expiresAt > Date.now()) {
+      touchTitleDataCacheEntry(this, key);
       return cached.data;
     }
     if (cached && cached.promise) {
+      touchTitleDataCacheEntry(this, key);
       return cached.promise;
     }
+    if (cached) {
+      delete this.cachedTitleData[key];
+      removeArrayValue(this.cachedTitleDataOrder, key);
+    }
 
-    var pending = this.fetchText(this.getMangaShareUrl(seriesId)).then(function(html) {
+    var pending;
+    pending = this.fetchText(this.getMangaShareUrl(seriesId)).then(function(html) {
       var data = parseInitialData(html);
       if (!isObject(data) || !isObject(data.queries)) {
         throw new Error("ComixTo title page did not expose initial-data queries.");
       }
-      cacheTitleInitialData(source, key, data);
+      if (source.cachedTitleData[key] && source.cachedTitleData[key].promise === pending) {
+        cacheTitleInitialData(source, key, data);
+      }
       return data;
     }).catch(function(error) {
-      delete source.cachedTitleData[key];
+      if (source.cachedTitleData[key] && source.cachedTitleData[key].promise === pending) {
+        delete source.cachedTitleData[key];
+        removeArrayValue(source.cachedTitleDataOrder, key);
+      }
       throw error;
     });
 
-    this.cachedTitleData[key] = { promise: pending };
+    cachePendingTitleData(this, key, pending);
     return pending;
   };
 
-  function cacheTitleInitialData(source, key, data) {
-    var existingIndex = source.cachedTitleDataOrder.indexOf(key);
+  function cachePendingTitleData(source, key, pending) {
+    removeArrayValue(source.cachedTitleDataOrder, key);
+    source.cachedTitleData[key] = { promise: pending };
+    source.cachedTitleDataOrder.push(key);
+    trimTitleDataCache(source);
+  }
 
-    if (existingIndex >= 0) {
-      source.cachedTitleDataOrder.splice(existingIndex, 1);
-    }
+  function cacheTitleInitialData(source, key, data) {
+    removeArrayValue(source.cachedTitleDataOrder, key);
     source.cachedTitleData[key] = {
       data: data,
       expiresAt: Date.now() + TITLE_DATA_CACHE_TTL_MS
     };
     source.cachedTitleDataOrder.push(key);
 
+    trimTitleDataCache(source);
+  }
+
+  function touchTitleDataCacheEntry(source, key) {
+    removeArrayValue(source.cachedTitleDataOrder, key);
+    source.cachedTitleDataOrder.push(key);
+  }
+
+  function trimTitleDataCache(source) {
     while (source.cachedTitleDataOrder.length > TITLE_DATA_CACHE_SIZE) {
       delete source.cachedTitleData[source.cachedTitleDataOrder.shift()];
     }
@@ -1554,7 +1588,7 @@
     }
 
     try {
-      return parseJsonResponse(response, url, liveProtocol);
+      return await parseJsonResponse(response, url, liveProtocol);
     } catch (error) {
       if (!encrypted) {
         throw error;
@@ -1563,7 +1597,7 @@
       this.invalidateLiveProtocol();
       try {
         liveProtocol = await this.getLiveProtocol();
-        return parseJsonResponse(response, url, liveProtocol);
+        return await parseJsonResponse(response, url, liveProtocol);
       } catch (refreshError) {
         throw error;
       }
@@ -1704,13 +1738,13 @@
 
   // Response Helpers
 
-  function parseJsonResponse(response, url, liveProtocol) {
+  async function parseJsonResponse(response, url, liveProtocol) {
     var raw = response && typeof response.data === "string" ? response.data : JSON.stringify(response && response.data || "");
     var parsed;
     ensureReadableResponse(response, raw, url);
 
     if (isObject(response.data)) {
-      return decodeComixEnvelope(response.data, url, liveProtocol);
+      return await decodeComixEnvelope(response.data, url, liveProtocol, response);
     }
 
     try {
@@ -1719,7 +1753,7 @@
       throw new Error("ComixTo returned unreadable JSON from " + formatRequestLabel(url) + ": " + String(error) + "." + buildDiagnosticPreview(raw));
     }
 
-    return decodeComixEnvelope(parsed, url, liveProtocol);
+    return await decodeComixEnvelope(parsed, url, liveProtocol, response);
   }
 
   function responseHasEncryptedEnvelope(response) {
@@ -1742,22 +1776,44 @@
     }
   }
 
-  function decodeComixEnvelope(payload, url, liveProtocol) {
+  async function decodeComixEnvelope(payload, url, liveProtocol, response) {
     var decrypted;
+    var interceptorError;
 
     if (!isObject(payload) || typeof payload.e !== "string") {
       return payload;
     }
 
+    if (liveProtocol && typeof liveProtocol.responseInterceptor === "function") {
+      try {
+        var processed = await liveProtocol.responseInterceptor({
+          data: payload,
+          status: response && response.status,
+          headers: response && response.headers || {},
+          config: Object.assign({ method: "get" }, buildLiveSignerRequestConfig(removeQueryParam(url, "_")))
+        });
+        var processedData = processed && Object.prototype.hasOwnProperty.call(processed, "data") ? processed.data : processed;
+
+        if (typeof processedData === "string") {
+          processedData = JSON.parse(processedData);
+        }
+        if (processedData !== void 0 && processedData !== null && !(isObject(processedData) && typeof processedData.e === "string")) {
+          return processedData;
+        }
+      } catch (error) {
+        interceptorError = error;
+      }
+    }
+
     try {
       if (!liveProtocol || typeof liveProtocol.decodeEnvelope !== "function") {
-        throw new Error("the current live protocol decoder is unavailable");
+        throw interceptorError || new Error("the current live protocol decoder is unavailable");
       }
 
       decrypted = liveProtocol.decodeEnvelope(payload.e);
       return JSON.parse(decrypted);
     } catch (error) {
-      throw new Error("ComixTo returned an unreadable encrypted API envelope from " + formatRequestLabel(url) + ": " + String(error) + ". The site may have rotated its API cipher." + buildDiagnosticPreview(JSON.stringify(payload)));
+      throw new Error("ComixTo returned an unreadable encrypted API envelope from " + formatRequestLabel(url) + ": " + String(interceptorError || error) + ". The site may have rotated its API cipher." + buildDiagnosticPreview(JSON.stringify(payload)));
     }
   }
 
@@ -1802,7 +1858,7 @@
       throw new Error("The requested ComixTo page was not found." + buildResponseDiagnosticContext(response));
     }
 
-    if ((response.status === 401 || response.status === 403 || response.status === 422) && isSignerProtectedApiUrl(url)) {
+    if (isSignerProtectedApiUrl(url) && isSignerRejectedResponse(response)) {
       throw new Error("ComixTo rejected a signer-protected API request with HTTP " + response.status + ". The site may have rotated its request signer and this Paperback source needs a signer refresh." + buildResponseDiagnosticContext(response));
     }
 
@@ -1832,13 +1888,38 @@
   function isSignerRejectedResponse(response) {
     var status = response && response.status;
     var body;
+    var payload;
+    var code;
+    var message;
+    var signatureErrors;
 
     if (status !== 401 && status !== 403 && status !== 422) {
       return false;
     }
 
     body = response && typeof response.data === "string" ? response.data : JSON.stringify(response && response.data || "");
-    return !isCloudflareMitigatedResponse(response) && !isChallengePage(body);
+    if (isCloudflareMitigatedResponse(response) || isChallengePage(body)) {
+      return false;
+    }
+
+    try {
+      payload = isObject(response && response.data) ? response.data : JSON.parse(body);
+    } catch (error) {
+      payload = null;
+    }
+
+    code = cleanText(payload && payload.code || "").toLowerCase();
+    message = cleanText(payload && payload.message || body || "").toLowerCase();
+    signatureErrors = payload && isObject(payload.errors) ? payload.errors._ || payload.errors.token || payload.errors.signature : null;
+
+    if (/^(?:missing|invalid|expired)_(?:token|signature)$/.test(code) || /^(?:token|signature)_(?:missing|invalid|expired)$/.test(code)) {
+      return true;
+    }
+    if (/(?:missing|invalid|expired)\s+(?:request\s+)?(?:token|signature)|(?:token|signature)\s+(?:is\s+)?(?:missing|invalid|expired)/i.test(message)) {
+      return true;
+    }
+
+    return signatureErrors !== null && signatureErrors !== void 0;
   }
 
   function addRetryQueryParam(url, attempt) {
