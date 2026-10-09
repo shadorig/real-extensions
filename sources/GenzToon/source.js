@@ -3,7 +3,7 @@
 (function() {
   // Constants
 
-  var DOMAIN = "https://genzupdates.com";
+  var DOMAIN = "https://genztoons.org";
   var SOURCE_INTENTS_SERIES_CHAPTERS = 1;
   var SOURCE_INTENTS_HOMEPAGE_SECTIONS = 4;
   var SOURCE_INTENTS_CLOUDFLARE_BYPASS_REQUIRED = 16;
@@ -11,10 +11,17 @@
   var CONTENT_RATING_MATURE = "MATURE";
   var SEARCH_PER_PAGE = 24;
   var HOME_LATEST_PER_PAGE = 24;
+  var BROWSE_CACHE_MS = 5 * 60 * 1000;
+  var LATEST_CACHE_MS = 2 * 60 * 1000;
+  var SERIES_PAGE_CACHE_MS = 60 * 1000;
+  var SERIES_PAGE_CACHE_LIMIT = 24;
   var SECTION_ID_FEATURED = "featured";
   var SECTION_ID_PINNED = "pinned_series";
+  var SECTION_ID_DISCOUNTED = "bulk_discounted_series";
   var SECTION_ID_LATEST = "latest_updates";
+  var SECTION_ID_TRENDING = "trending";
   var SECTION_ID_RECENT = "recently_added";
+  var SECTION_ID_EDITOR_CHOICE = "editors_choice";
   var SECTION_ID_BLACK_WHITE_SERIES = "black_white_series";
   var SECTION_ID_COMPLETED = "completed_series";
   var LATEST_UPDATES_VIEW_ALL = "all";
@@ -68,7 +75,7 @@
   // Source Info
 
   var GenzToonInfo = {
-    version: "1.0.0",
+    version: "1.1.0",
     name: "GenzToon",
     description: "Extension that pulls series from " + DOMAIN,
     author: "real",
@@ -102,14 +109,17 @@
 
     this.stateManager = App.createSourceStateManager();
     this.cachedBrowseSeries = null;
+    this.cachedBrowseSeriesExpiresAt = 0;
     this.cachedBrowseSeriesRequest = null;
-    this.cachedFilterData = null;
     this.cachedSeriesPages = {};
+    this.cachedSeriesPageOrder = [];
     this.cachedSeriesPageRequests = {};
-    this.cachedSeriesIndexHtml = null;
-    this.cachedSeriesIndexHtmlRequest = null;
     this.cachedLatestPosterItems = {};
+    this.cachedLatestPosterItemsExpiresAt = {};
     this.cachedLatestPosterItemRequests = {};
+    this.homeLatestInitialIds = {};
+    this.homeLatestRenderedView = "";
+    this.seriesSlugById = {};
   }
 
   // Paperback Interface Methods
@@ -123,7 +133,9 @@
   };
 
   GenzToon.prototype.getMangaShareUrl = function(seriesId) {
-    return DOMAIN + "/series/" + encodePathSegment(seriesId) + "/";
+    var stableId = cleanText(seriesId || "");
+    var slug = cleanText(this.seriesSlugById[stableId] || "");
+    return DOMAIN + "/series/" + encodePathSegment(slug || stableId) + "/";
   };
 
   GenzToon.prototype.getChapterShareUrl = function(seriesId, chapterId) {
@@ -134,10 +146,26 @@
     var latestUpdatesView = await getLatestUpdatesView(this.stateManager);
     var results = await Promise.all([
       this.fetchText(DOMAIN + "/"),
-      this.getLatestSectionItems(1, latestUpdatesView)
+      latestUpdatesView === LATEST_UPDATES_VIEW_ALL ? Promise.resolve(null) : this.getLatestSectionItems(1, latestUpdatesView)
     ]);
     var html = results[0];
     var latestResults = results[1];
+    var homepageSeriesIdLookup = buildHomepageSeriesIdLookup(html);
+    cacheSeriesSlugMappingsFromLookup(this.seriesSlugById, homepageSeriesIdLookup);
+    var latestSectionHtml = extractHomeSectionHtml(html, "Latest Updates");
+    var latestItems;
+    var latestContainsMoreItems;
+
+    if (latestResults) {
+      latestItems = latestResults.results;
+      latestContainsMoreItems = latestResults.metadata !== void 0;
+    } else {
+      latestItems = parseLatestPosterItemsChecked(latestSectionHtml);
+      latestContainsMoreItems = hasLatestViewMoreLink(latestSectionHtml);
+    }
+
+    this.homeLatestInitialIds[latestUpdatesView] = extractPartialSeriesIds(latestItems);
+    this.homeLatestRenderedView = latestUpdatesView;
     var sections = [
       createHomeSection(
         SECTION_ID_FEATURED,
@@ -150,21 +178,42 @@
         SECTION_ID_PINNED,
         "Pinned Series",
         "singleRowLarge",
-        parseLatestPosterItems(extractHomeSectionHtml(html, "Pinned Series")),
+        parseLatestPosterItemsChecked(extractHomeSectionHtml(html, "Pinned Series")),
+        false
+      ),
+      createHomeSection(
+        SECTION_ID_DISCOUNTED,
+        "Bulk Discounted Series",
+        "singleRowNormal",
+        mapSeriesItems(parseBrowseSeriesEntries(extractHomeSectionHtml(html, "Bulk Discounted Series"))),
         false
       ),
       createHomeSection(
         SECTION_ID_LATEST,
         buildLatestUpdatesSectionTitle(latestUpdatesView),
         "singleRowNormal",
-        latestResults.results,
-        latestResults.metadata !== void 0
+        latestItems,
+        latestContainsMoreItems
+      ),
+      createHomeSection(
+        SECTION_ID_TRENDING,
+        "Trending",
+        "singleRowNormal",
+        mapSeriesItems(parseBrowseSeriesEntries(extractHomeSectionHtml(html, "Trending"))),
+        false
       ),
       createHomeSection(
         SECTION_ID_RECENT,
         "Recently Added",
         "singleRowNormal",
         mapSeriesItems(parseBrowseSeriesEntries(extractHomeSectionHtml(html, "Recently Added"))),
+        false
+      ),
+      createHomeSection(
+        SECTION_ID_EDITOR_CHOICE,
+        "Editor's Choice",
+        "singleRowLarge",
+        parseEditorChoiceItems(html),
         false
       ),
       createHomeSection(
@@ -197,7 +246,30 @@
       });
     }
 
-    return this.getLatestSectionItems(toPositiveInteger(metadata && metadata.page, 1));
+    var metadataView = cleanText(metadata && metadata.view || "");
+    var renderedView = cleanText(this.homeLatestRenderedView || "");
+    var view = metadataView.length > 0 ? normalizeLatestUpdatesView(metadataView) :
+      renderedView.length > 0 ? normalizeLatestUpdatesView(renderedView) :
+      await getLatestUpdatesView(this.stateManager);
+    var seenIds = Array.isArray(metadata && metadata.seenIds) ? metadata.seenIds.slice() :
+      Array.isArray(this.homeLatestInitialIds[view]) ? this.homeLatestInitialIds[view].slice() : [];
+    var allItems = await this.fetchAllLatestPosterItems(view);
+
+    if (seenIds.length === 0) {
+      if (view === LATEST_UPDATES_VIEW_ALL) {
+        var homeHtml = await this.fetchText(DOMAIN + "/");
+        seenIds = extractPartialSeriesIds(parseLatestPosterItemsChecked(extractHomeSectionHtml(homeHtml, "Latest Updates")));
+      } else {
+        seenIds = extractPartialSeriesIds(allItems.slice(0, HOME_LATEST_PER_PAGE));
+      }
+    }
+
+    return createPagedPartialSeriesResultsExcludingSeen(
+      allItems,
+      seenIds,
+      HOME_LATEST_PER_PAGE,
+      view
+    );
   };
 
   GenzToon.prototype.getCloudflareBypassRequestAsync = async function() {
@@ -256,19 +328,14 @@
   };
 
   GenzToon.prototype.getSearchTags = async function() {
-    if (!this.cachedFilterData) {
-      this.cachedFilterData = await this.fetchFilterData();
-    }
-
-    return buildSearchTagSections(this.cachedFilterData);
+    return buildSearchTagSections(await this.fetchFilterData());
   };
 
   GenzToon.prototype.getMangaDetails = async function(seriesId) {
-    var results = await Promise.all([
-      this.getSeriesPageHtml(seriesId),
-      this.fetchBrowseSeriesEntry(seriesId)
-    ]);
-    var seriesDetails = parseSeriesDetails(results[0], results[1]);
+    var seriesDetails = parseSeriesDetails(await this.getSeriesPageHtml(seriesId));
+    if (cleanText(seriesDetails.title).length === 0 || cleanText(seriesDetails.image).length === 0) {
+      throw new Error("GenzToon series detail markup changed and could not be parsed.");
+    }
 
     return App.createSourceManga({
       id: seriesId,
@@ -345,7 +412,7 @@
   // Source-Specific Fetch Helpers
 
   GenzToon.prototype.fetchAllBrowseSeries = async function() {
-    if (Array.isArray(this.cachedBrowseSeries)) {
+    if (Array.isArray(this.cachedBrowseSeries) && Date.now() < this.cachedBrowseSeriesExpiresAt) {
       return this.cachedBrowseSeries;
     }
 
@@ -354,7 +421,14 @@
     }
 
     this.cachedBrowseSeriesRequest = this.fetchText(DOMAIN + "/search_series").then(function(html) {
-      this.cachedBrowseSeries = parseBrowseSeriesEntries(html);
+      var parsedSeries = parseBrowseSeriesEntries(html);
+      if (containsSeriesLinks(html) && parsedSeries.length === 0) {
+        throw new Error("GenzToon series catalog markup changed and could not be parsed.");
+      }
+
+      this.cachedBrowseSeries = parsedSeries;
+      cacheSeriesSlugMappingsFromSeries(this.seriesSlugById, parsedSeries);
+      this.cachedBrowseSeriesExpiresAt = Date.now() + BROWSE_CACHE_MS;
       this.cachedBrowseSeriesRequest = null;
       return this.cachedBrowseSeries;
     }.bind(this)).catch(function(error) {
@@ -380,7 +454,7 @@
   GenzToon.prototype.fetchAllLatestPosterItems = async function(latestUpdatesView) {
     var view = normalizeLatestUpdatesView(latestUpdatesView);
 
-    if (Array.isArray(this.cachedLatestPosterItems[view])) {
+    if (Array.isArray(this.cachedLatestPosterItems[view]) && Date.now() < toNumber(this.cachedLatestPosterItemsExpiresAt[view], 0)) {
       return this.cachedLatestPosterItems[view];
     }
 
@@ -389,7 +463,9 @@
     }
 
     this.cachedLatestPosterItemRequests[view] = this.fetchText(buildLatestUpdatesUrl(view)).then(function(html) {
-      this.cachedLatestPosterItems[view] = parseLatestPosterItems(extractHomeSectionHtml(html, "Latest Updates"));
+      cacheSeriesSlugMappingsFromLookup(this.seriesSlugById, buildHomepageSeriesIdLookup(html));
+      this.cachedLatestPosterItems[view] = parseLatestPosterItemsChecked(extractHomeSectionHtml(html, "Latest Updates"));
+      this.cachedLatestPosterItemsExpiresAt[view] = Date.now() + LATEST_CACHE_MS;
       delete this.cachedLatestPosterItemRequests[view];
       return this.cachedLatestPosterItems[view];
     }.bind(this)).catch(function(error) {
@@ -400,50 +476,42 @@
     return this.cachedLatestPosterItemRequests[view];
   };
 
-  GenzToon.prototype.fetchBrowseSeriesEntry = async function(seriesId) {
-    var targetId = cleanText(seriesId || "");
-    if (targetId.length === 0) {
-      return null;
-    }
-
-    var allSeries = await this.fetchAllBrowseSeries();
-    for (var index = 0; index < allSeries.length; index += 1) {
-      if (cleanText(allSeries[index] && allSeries[index].id) === targetId) {
-        return allSeries[index];
-      }
-    }
-
-    return null;
-  };
-
   GenzToon.prototype.fetchFilterData = async function() {
-    var results = await Promise.all([
-      this.fetchSeriesIndexHtml(),
-      this.fetchAllBrowseSeries()
-    ]);
-    var seriesIndexHtml = results[0];
-    var allSeries = results[1];
-    var genreOptions = extractDropdownFilterOptions(seriesIndexHtml, "genre");
-    var statusOptions = extractDropdownFilterOptions(seriesIndexHtml, "status");
-    var typeOptions = extractDropdownFilterOptions(seriesIndexHtml, "type").filter(isSupportedTypeOption);
+    var allSeries = await this.fetchAllBrowseSeries();
 
     return {
-      genres: genreOptions.length > 0 ? normalizeGenreOptions(genreOptions) : extractGenreOptions(allSeries),
-      statuses: statusOptions.length > 0 ? statusOptions : DEFAULT_STATUS_OPTIONS,
-      types: typeOptions.length > 0 ? typeOptions : DEFAULT_TYPE_OPTIONS
+      genres: extractGenreOptions(allSeries),
+      statuses: mergeFilterOptions(DEFAULT_STATUS_OPTIONS, extractSeriesFieldOptions(allSeries, "statusId", "statusLabel")),
+      types: mergeFilterOptions(
+        DEFAULT_TYPE_OPTIONS,
+        extractSeriesFieldOptions(allSeries, "typeId", "typeLabel").filter(isSupportedTypeOption)
+      )
     };
   };
 
   GenzToon.prototype.getSeriesPageHtml = async function(seriesId) {
     var cacheKey = cleanText(seriesId || "");
+    if (cacheKey.length === 0) {
+      throw new Error("GenzToon requires a series id.");
+    }
 
-    if (typeof this.cachedSeriesPages[cacheKey] === "string") {
-      return this.cachedSeriesPages[cacheKey];
+    var cached = this.cachedSeriesPages[cacheKey];
+
+    if (cached && Date.now() < cached.expiresAt) {
+      touchCacheKey(this.cachedSeriesPageOrder, cacheKey);
+      return cached.value;
     }
 
     if (!this.cachedSeriesPageRequests[cacheKey]) {
       this.cachedSeriesPageRequests[cacheKey] = this.fetchText(this.getMangaShareUrl(cacheKey)).then(function(html) {
-        this.cachedSeriesPages[cacheKey] = html;
+        storeSeriesSlugMapping(this.seriesSlugById, cacheKey, extractCanonicalSeriesSlug(html));
+        storeBoundedCacheEntry(
+          this.cachedSeriesPages,
+          this.cachedSeriesPageOrder,
+          cacheKey,
+          { value: html, expiresAt: Date.now() + SERIES_PAGE_CACHE_MS },
+          SERIES_PAGE_CACHE_LIMIT
+        );
         delete this.cachedSeriesPageRequests[cacheKey];
         return html;
       }.bind(this)).catch(function(error) {
@@ -453,27 +521,6 @@
     }
 
     return this.cachedSeriesPageRequests[cacheKey];
-  };
-
-  GenzToon.prototype.fetchSeriesIndexHtml = async function() {
-    if (typeof this.cachedSeriesIndexHtml === "string" && this.cachedSeriesIndexHtml.length > 0) {
-      return this.cachedSeriesIndexHtml;
-    }
-
-    if (this.cachedSeriesIndexHtmlRequest) {
-      return this.cachedSeriesIndexHtmlRequest;
-    }
-
-    this.cachedSeriesIndexHtmlRequest = this.fetchText(DOMAIN + "/series/").then(function(html) {
-      this.cachedSeriesIndexHtml = html;
-      this.cachedSeriesIndexHtmlRequest = null;
-      return html;
-    }.bind(this)).catch(function(error) {
-      this.cachedSeriesIndexHtmlRequest = null;
-      throw error;
-    }.bind(this));
-
-    return this.cachedSeriesIndexHtmlRequest;
   };
 
   GenzToon.prototype.fetchText = async function(url) {
@@ -567,19 +614,21 @@
       var block = match[0];
       var openTagMatch = block.match(/^<button\b[^>]*>/i);
       var openTag = openTagMatch ? openTagMatch[0] : "";
-      var seriesId = cleanText(extractHtmlAttribute(openTag, "id"));
-      var seriesUrl = normalizeUrl(extractMatch(block, /<a[^>]*href="(\/series\/[^"]+\/?)"/i, 1));
-
-      if (seriesId.length === 0 && seriesUrl.length > 0) {
-        seriesId = extractSeriesId(seriesUrl);
-      }
+      var legacyId = cleanText(extractHtmlAttribute(openTag, "id"));
+      var anchorTag = extractFirstSeriesAnchorTag(block);
+      var seriesUrl = normalizeUrl(extractHtmlAttribute(anchorTag, "href"));
+      var slug = extractSeriesId(seriesUrl);
+      var seriesId = legacyId || slug;
 
       if (seriesId.length === 0 || seen[seriesId]) {
         continue;
       }
 
       var rawTitle = cleanText(extractHtmlAttribute(openTag, "title"));
-      var title = cleanText(extractMatch(block, /<h3[^>]*>([\s\S]*?)<\/h3>/i, 1)) || rawTitle;
+      var title = cleanText(extractHtmlAttribute(anchorTag, "title")) ||
+        cleanText(extractHtmlAttribute(openTag, "alt")) ||
+        cleanText(extractMatch(block, /<div[^>]*class=(['"])[^'"]*\bfont-bold\b[^'"]]*\1[^>]*>([\s\S]*?)<\/div>/i, 2)) ||
+        rawTitle;
       if (title.length === 0) {
         continue;
       }
@@ -590,6 +639,8 @@
       var statusId = normalizeOptionId(extractHtmlAttribute(openTag, "data-status"));
       var typeLabel = formatOptionLabel(extractHtmlAttribute(openTag, "data-type"));
       var statusLabel = formatOptionLabel(extractHtmlAttribute(openTag, "data-status"));
+      var discountLabel = cleanText(extractMatch(block, />\s*(\d+%\s+OFF)\s*</i, 1));
+      var isNew = /<span\b[^>]*>\s*New\s*<\/span>/i.test(block);
 
       if (isExcludedSeriesTypeId(typeId)) {
         continue;
@@ -598,6 +649,7 @@
       seen[seriesId] = true;
       entries.push({
         id: seriesId,
+        slug: slug,
         title: title,
         searchTitle: rawTitle.length > 0 ? rawTitle : title,
         image: normalizeCssUrl(extractMatch(block, /background-image:\s*url\(([^)]+)\)/i, 1)),
@@ -608,7 +660,9 @@
         statusId: statusId,
         statusLabel: statusLabel,
         typeId: typeId,
-        typeLabel: typeLabel
+        typeLabel: typeLabel,
+        discountLabel: discountLabel,
+        isNew: isNew
       });
     }
 
@@ -642,6 +696,44 @@
     });
   }
 
+  function createPagedPartialSeriesResultsExcludingSeen(items, seenIds, perPage, view) {
+    var normalizedItems = Array.isArray(items) ? items : [];
+    var seen = {};
+    var normalizedSeenIds = [];
+
+    (Array.isArray(seenIds) ? seenIds : []).forEach(function(id) {
+      var normalizedId = cleanText(id);
+      if (normalizedId.length === 0 || seen[normalizedId]) {
+        return;
+      }
+      seen[normalizedId] = true;
+      normalizedSeenIds.push(normalizedId);
+    });
+
+    var remaining = normalizedItems.filter(function(item) {
+      var id = cleanText(item && item.mangaId);
+      return id.length > 0 && !seen[id];
+    });
+    var results = remaining.slice(0, perPage);
+    var nextSeenIds = normalizedSeenIds.concat(extractPartialSeriesIds(results));
+
+    return App.createPagedResults({
+      results: results,
+      metadata: results.length < remaining.length ? {
+        view: normalizeLatestUpdatesView(view),
+        seenIds: nextSeenIds
+      } : void 0
+    });
+  }
+
+  function extractPartialSeriesIds(items) {
+    return (Array.isArray(items) ? items : []).map(function(item) {
+      return cleanText(item && item.mangaId);
+    }).filter(function(id, index, values) {
+      return id.length > 0 && values.indexOf(id) === index;
+    });
+  }
+
   function extractSeriesId(url) {
     var match = String(url || "").match(/\/series\/([^/?#]+)\/?/i);
     return match ? match[1] : "";
@@ -649,9 +741,16 @@
 
   function buildBrowseSubtitle(series) {
     var parts = [];
+    var discountLabel = cleanText(series && series.discountLabel || "");
     var typeLabel = cleanText(series && series.typeLabel || "");
     var statusLabel = getVisibleBrowseStatusLabel(series && series.statusId, series && series.statusLabel);
 
+    if (series && series.isNew === true) {
+      parts.push("New");
+    }
+    if (discountLabel.length > 0) {
+      parts.push(discountLabel);
+    }
     if (typeLabel.length > 0) {
       parts.push(typeLabel);
     }
@@ -687,16 +786,107 @@
     });
   }
 
+  function buildHomepageSeriesIdLookup(html) {
+    var lookup = {};
+    var value = String(html || "");
+    var buttonRegex = /<button\b[\s\S]*?<\/button>/gi;
+    var match;
+
+    while ((match = buttonRegex.exec(value)) !== null) {
+      var block = match[0];
+      var openTag = extractOpeningTag(block);
+      var databaseId = cleanText(extractHtmlAttribute(openTag, "id"));
+      var seriesAnchor = extractFirstSeriesAnchorTag(block);
+      var slug = extractSeriesId(normalizeUrl(extractHtmlAttribute(seriesAnchor, "href")));
+      if (databaseId.length > 0 && slug.length > 0) {
+        lookup[slug] = databaseId;
+      }
+    }
+
+    extractBlocksByClass(value, "div", "editor-pick-button").forEach(function(block) {
+      var tag = extractOpeningTag(block);
+      var databaseId = cleanText(extractHtmlAttribute(tag, "id"));
+      var slug = cleanText(extractHtmlAttribute(tag, "data-id"));
+      if (databaseId.length > 0 && slug.length > 0) {
+        lookup[slug] = databaseId;
+      }
+    });
+
+    extractBlocksByClass(value, "div", "latest-poster").forEach(function(block) {
+      var seriesAnchor = extractFirstSeriesAnchorTag(block);
+      var slug = extractSeriesId(normalizeUrl(extractHtmlAttribute(seriesAnchor, "href")));
+      var databaseId = extractSeriesDatabaseIdFromChapterHref(extractHtmlAttribute(extractFirstChapterAnchorTag(block), "href"));
+      if (databaseId.length > 0 && slug.length > 0) {
+        lookup[slug] = databaseId;
+      }
+    });
+
+    return lookup;
+  }
+
+  function cacheSeriesSlugMappingsFromLookup(target, lookup) {
+    if (!target || !lookup || typeof lookup !== "object") {
+      return;
+    }
+
+    Object.keys(lookup).forEach(function(slug) {
+      storeSeriesSlugMapping(target, lookup[slug], slug);
+    });
+  }
+
+  function cacheSeriesSlugMappingsFromSeries(target, seriesList) {
+    (Array.isArray(seriesList) ? seriesList : []).forEach(function(series) {
+      storeSeriesSlugMapping(target, series && series.id, series && series.slug);
+    });
+  }
+
+  function storeSeriesSlugMapping(target, seriesId, slug) {
+    var normalizedId = cleanText(seriesId || "");
+    var normalizedSlug = cleanText(slug || "");
+    if (!target || normalizedId.length === 0 || normalizedSlug.length === 0 || normalizedId === normalizedSlug) {
+      return;
+    }
+
+    target[normalizedId] = normalizedSlug;
+  }
+
+  function extractCanonicalSeriesSlug(html) {
+    var regex = /<link\b[^>]*>/gi;
+    var match;
+
+    while ((match = regex.exec(String(html || ""))) !== null) {
+      var tag = match[0];
+      if (cleanText(extractHtmlAttribute(tag, "rel")).toLowerCase() !== "canonical") {
+        continue;
+      }
+
+      return extractSeriesId(normalizeUrl(extractHtmlAttribute(tag, "href")));
+    }
+
+    return "";
+  }
+
   function parseFeaturedHomeItems(html) {
     var items = [];
     var seen = {};
-    var sectionHtml = sliceBetween(html, /<section class="splide series-splide/i, /<\/section>/i);
-    var regex = /<a[^>]*href="(\/series\/[^"]+\/?)"[^>]*title="([^"]*)"[^>]*class="[^"]*splide__slide[^"]*"[\s\S]*?background-image:\s*url\(([^)]+)\)/gi;
+    var sectionHtml = extractElementHtmlByClass(html, "section", "series-splide");
+    var regex = /<a\b[^>]*>[\s\S]*?<\/a>/gi;
     var match;
 
     while ((match = regex.exec(sectionHtml)) !== null) {
-      var url = normalizeUrl(match[1]);
-      var seriesId = extractSeriesId(url);
+      var block = match[0];
+      var openTag = extractOpeningTag(block);
+      if (!hasHtmlClass(openTag, "splide__slide")) {
+        continue;
+      }
+
+      var url = normalizeUrl(extractHtmlAttribute(openTag, "href"));
+      var slug = extractSeriesId(url);
+      var seriesId = slug;
+      var title = cleanText(extractHtmlAttribute(openTag, "title")) || cleanText(extractHtmlAttribute(openTag, "alt"));
+      if (isUnsupportedNovelSeries(slug, title, "")) {
+        continue;
+      }
       if (seriesId.length === 0 || seen[seriesId]) {
         continue;
       }
@@ -704,8 +894,8 @@
       seen[seriesId] = true;
       items.push(createPartialSeries({
         id: seriesId,
-        title: cleanText(match[2]),
-        image: normalizeCssUrl(match[3])
+        title: title,
+        image: normalizeCssUrl(extractMatch(block, /background-image:\s*url\(([^)]+)\)/i, 1))
       }));
     }
 
@@ -729,45 +919,123 @@
   function parseLatestPosterItems(html) {
     var items = [];
     var seen = {};
-    var blockRegex = /<div[^>]*class="group latest-poster[^"]*"[\s\S]*?(?=<div[^>]*class="group latest-poster[^"]*"|$)/gi;
-    var match;
+    var blocks = extractBlocksByClass(html, "div", "latest-poster");
 
-    while ((match = blockRegex.exec(String(html || ""))) !== null) {
-      var block = match[0];
-      var seriesUrl = normalizeUrl(extractMatch(block, /<a[^>]*href="(\/series\/[^"]+\/?)"[^>]*title="([^"]*)"/i, 1));
-      var seriesId = extractSeriesId(seriesUrl);
+    blocks.forEach(function(block) {
+      var seriesAnchor = extractFirstSeriesAnchorTag(block);
+      var seriesUrl = normalizeUrl(extractHtmlAttribute(seriesAnchor, "href"));
+      var slug = extractSeriesId(seriesUrl);
+      var seriesId = slug;
+      var title = cleanText(extractMatch(block, /<h3[^>]*>([\s\S]*?)<\/h3>/i, 1)) || cleanText(extractHtmlAttribute(seriesAnchor, "title")) || cleanText(extractHtmlAttribute(seriesAnchor, "alt"));
+      var typeLabel = extractLatestPosterTypeLabel(block);
 
-      if (seriesId.length === 0 || seen[seriesId]) {
-        continue;
+      if (seriesId.length === 0 || title.length === 0 || isUnsupportedNovelSeries(slug, title, typeLabel) || seen[seriesId]) {
+        return;
       }
 
       seen[seriesId] = true;
       items.push(createPartialSeries({
         id: seriesId,
-        title: cleanText(extractMatch(block, /<h3[^>]*>([\s\S]*?)<\/h3>/i, 1)) || cleanText(extractMatch(block, /<a[^>]*href="\/series\/[^"]+\/?"[^>]*title="([^"]*)"/i, 1)),
+        title: title,
         image: normalizeCssUrl(extractMatch(block, /background-image:\s*url\(([^)]+)\)/i, 1))
       }, buildLatestPosterSubtitle(block)));
+    });
+
+    return items;
+  }
+
+  function parseLatestPosterItemsChecked(html) {
+    var items = parseLatestPosterItems(html);
+    if (items.length === 0 && containsSupportedLatestPosterEvidence(html)) {
+      throw new Error("GenzToon latest-card markup changed and could not be parsed.");
     }
+    return items;
+  }
+
+  function containsSupportedLatestPosterEvidence(html) {
+    var regex = /<a\b[^>]*>/gi;
+    var match;
+
+    while ((match = regex.exec(String(html || ""))) !== null) {
+      var tag = match[0];
+      var slug = extractSeriesId(normalizeUrl(extractHtmlAttribute(tag, "href")));
+      var title = cleanText(extractHtmlAttribute(tag, "title")) || cleanText(extractHtmlAttribute(tag, "alt"));
+      if (slug.length > 0 && title.length > 0 && !isUnsupportedNovelSeries(slug, title, "")) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  function parseEditorChoiceItems(html) {
+    var items = [];
+    var seen = {};
+    var blocks = extractBlocksByClass(html, "div", "editor-pick-button");
+
+    blocks.forEach(function(block) {
+      var tag = extractOpeningTag(block);
+      var legacyId = cleanText(extractHtmlAttribute(tag, "id"));
+      var slug = cleanText(extractHtmlAttribute(tag, "data-id"));
+      var seriesId = legacyId || slug;
+      var title = cleanText(extractHtmlAttribute(tag, "title"));
+      var imageId = cleanText(extractHtmlAttribute(tag, "data-img"));
+
+      if (seriesId.length === 0 || title.length === 0 || isUnsupportedNovelSeries(slug, title, "") || seen[seriesId]) {
+        return;
+      }
+
+      seen[seriesId] = true;
+      items.push(createPartialSeries({
+        id: seriesId,
+        title: title,
+        image: imageId.length > 0 ? buildUploadUrl(imageId) : ""
+      }));
+    });
 
     return items;
   }
 
   function buildLatestPosterSubtitle(block) {
     var entries = extractLatestPosterChapterEntries(block);
-    if (entries.length === 0) {
-      return "";
+    var parts = [];
+    var typeLabel = extractLatestPosterTypeLabel(block);
+
+    if (typeLabel.length > 0) {
+      parts.push(typeLabel);
+    }
+    if (entries.length > 0) {
+      parts.push(buildChapterPreviewSubtitle(entries[0]));
     }
 
-    return buildChapterPreviewSubtitle(entries[0]);
+    return parts.join(" · ");
+  }
+
+  function extractLatestPosterTypeLabel(block) {
+    return formatOptionLabel(extractMatch(block, /<span\b[^>]*class=(['"])[^'"]*\bcapitalize\b[^'"]*\1[^>]*>\s*([\s\S]*?)\s*<\/span>/i, 2));
+  }
+
+  function isUnsupportedNovelSeries(slug, title, typeLabel) {
+    return normalizeOptionId(typeLabel) === "novel" ||
+      /\[novel\]/i.test(cleanText(title)) ||
+      /(?:^|-)novel$/i.test(cleanText(slug));
+  }
+
+  function hasLatestViewMoreLink(html) {
+    return /<a\b[^>]*href=(['"])\/latest\/?\1/i.test(String(html || ""));
   }
 
   function extractLatestPosterChapterEntries(block) {
     var entries = [];
-    var regex = /<a[^>]*href="\/chapter\/[^"]+\/?"[^>]*>([\s\S]*?)<\/a>/gi;
+    var regex = /<a\b[^>]*>[\s\S]*?<\/a>/gi;
     var match;
 
     while ((match = regex.exec(String(block || ""))) !== null) {
       var entryHtml = match[0];
+      var openTag = extractOpeningTag(entryHtml);
+      if (!isChapterHref(extractHtmlAttribute(openTag, "href"))) {
+        continue;
+      }
       var label = extractChapterEntryLabel(entryHtml, /<div class="truncate[^"]*">\s*([\s\S]*?)\s*<\/div>/i);
 
       if (label.length === 0) {
@@ -776,7 +1044,9 @@
 
       entries.push({
         label: label,
-        isLocked: isLockedChapterEntryHtml(entryHtml)
+        isLocked: isLockedChapterEntryHtml(entryHtml),
+        coinCost: toNumber(extractHtmlAttribute(entryHtml, "c"), 0),
+        dateLabel: cleanText(extractHtmlAttribute(entryHtml, "d"))
       });
     }
 
@@ -1001,6 +1271,7 @@
     return [
       series && series.title,
       series && series.searchTitle,
+      series && series.slug ? String(series.slug).replace(/-/g, " ") : "",
       series && series.id ? String(series.id).replace(/-/g, " ") : ""
     ].some(function(value) {
       return normalizeSearchText(value).indexOf(needle) !== -1;
@@ -1018,6 +1289,50 @@
         }
 
         deduped[normalized.id] = normalized;
+      });
+    });
+
+    return sortFilterOptions(Object.keys(deduped).map(function(key) {
+      return deduped[key];
+    }));
+  }
+
+  function extractSeriesFieldOptions(seriesList, idField, labelField) {
+    var deduped = {};
+
+    (Array.isArray(seriesList) ? seriesList : []).forEach(function(series) {
+      var id = cleanText(series && series[idField]).toLowerCase();
+      var label = cleanText(series && series[labelField]);
+      if (id.length === 0 || label.length === 0 || deduped[id]) {
+        return;
+      }
+
+      deduped[id] = {
+        id: id,
+        label: label
+      };
+    });
+
+    return sortFilterOptions(Object.keys(deduped).map(function(key) {
+      return deduped[key];
+    }));
+  }
+
+  function mergeFilterOptions(primary, secondary) {
+    var deduped = {};
+
+    [primary, secondary].forEach(function(options) {
+      (Array.isArray(options) ? options : []).forEach(function(option) {
+        var id = cleanText(option && option.id).toLowerCase();
+        var label = cleanText(option && option.label);
+        if (id.length === 0 || label.length === 0 || deduped[id]) {
+          return;
+        }
+
+        deduped[id] = {
+          id: id,
+          label: label
+        };
       });
     });
 
@@ -1060,73 +1375,41 @@
     });
   }
 
-  function extractDropdownFilterOptions(html, filterType) {
-    var pattern = new RegExp(
-      'initializeDropdownMenu\\(\\{\\s*type:\\s*"' + escapeRegex(filterType) + '"[\\s\\S]*?items:\\s*\\[([\\s\\S]*?)\\]\\s*\\}\\);',
-      "i"
-    );
-    var block = extractMatch(html, pattern, 1);
-    var options = [];
-    var seen = {};
-    var itemRegex = /value:\s*"([^"]+)"\s*,\s*displayName:\s*"([^"]+)"/gi;
-    var match;
-
-    while ((match = itemRegex.exec(block)) !== null) {
-      var id = normalizeOptionId(match[1]);
-      var label = cleanText(match[2]);
-      if (id.length === 0 || label.length === 0 || seen[id]) {
-        continue;
-      }
-
-      seen[id] = true;
-      options.push({
-        id: id,
-        label: label
-      });
-    }
-
-    return sortFilterOptions(options);
-  }
-
   function isSupportedTypeOption(option) {
     return !isExcludedSeriesTypeId(option && option.id);
   }
 
   // Detail Helpers
 
-  function parseSeriesDetails(html, browseEntry) {
-    var metaHtml = sliceBetween(
-      html,
-      /<h1\b/i,
-      /<div class="text-lg font-bold">\s*(?:Synopsis|Summary)\s*<\/div>/i
-    );
-    var statusLabel = extractMetadataValue(metaHtml, "Status") || cleanText(browseEntry && browseEntry.statusLabel || "");
-    var typeLabel = extractMetadataValue(metaHtml, "Type") ||
-      extractMetadataValue(metaHtml, "Series Type") ||
-      cleanText(browseEntry && browseEntry.typeLabel || "");
+  function parseSeriesDetails(html) {
+    var statusLabel = extractMetadataValue(html, "Status");
+    var typeLabel = extractMetadataValue(html, "Type") ||
+      extractMetadataValue(html, "Series Type");
     var alternativeTitles = extractAlternativeTitles(html);
 
-    if (alternativeTitles.length === 0) {
-      alternativeTitles = extractAlternativeTitlesFromBrowseEntry(browseEntry, extractMatch(metaHtml, /<h1[^>]*>([\s\S]*?)<\/h1>/i, 1));
-    }
-
     return {
-      title: cleanText(extractMatch(metaHtml, /<h1[^>]*>([\s\S]*?)<\/h1>/i, 1)) ||
-        cleanText(extractMatch(html, /<meta property="og:title" content="([^"]+)"/i, 1)) ||
-        cleanText(browseEntry && browseEntry.title || ""),
+      title: cleanText(extractMatch(html, /<h1\b[^>]*>([\s\S]*?)<\/h1>/i, 1)) ||
+        cleanText(extractMetaContent(html, "og:title")),
       alternativeTitles: alternativeTitles,
-      image: normalizeUrl(extractMatch(html, /<meta property="og:image" content="([^"]+)"/i, 1)) ||
-        normalizeCssUrl(extractMatch(metaHtml, /--photoURL:url\(([^)]+)\)/i, 1)) ||
-        normalizeUrl(browseEntry && browseEntry.image || ""),
+      image: normalizeUrl(extractMetaContent(html, "og:image")) ||
+        normalizeCssUrl(extractMatch(html, /--photoURL:url\(([^)]+)\)/i, 1)),
       description: extractSeriesDescription(html),
-      author: extractMetadataValue(metaHtml, "Author"),
-      artist: extractMetadataValue(metaHtml, "Artist"),
+      author: extractMetadataValue(html, "Author"),
+      artist: extractMetadataValue(html, "Artist"),
       statusId: normalizeOptionId(statusLabel),
       statusLabel: formatOptionLabel(statusLabel),
       typeId: normalizeOptionId(typeLabel),
       typeLabel: formatOptionLabel(typeLabel),
-      genres: mergeGenreEntries(extractDetailGenres(metaHtml), browseEntry && browseEntry.genres)
+      publishedAt: extractJsonLdString(html, "datePublished"),
+      updatedAt: extractJsonLdString(html, "dateModified"),
+      chapterCount: toNumber(extractMatch(html, />\s*(\d+)\s+Chapters\s*</i, 1), 0),
+      genres: extractDetailGenres(html)
     };
+  }
+
+  function extractJsonLdString(html, key) {
+    var pattern = new RegExp('"' + escapeRegex(key) + '"\\s*:\\s*"([^\"]+)"', "i");
+    return cleanText(extractMatch(html, pattern, 1));
   }
 
   function extractSeriesDescription(html) {
@@ -1136,14 +1419,14 @@
       return description;
     }
 
-    return cleanText(extractMatch(html, /<meta name="description" content="([^"]+)"/i, 1));
+    return cleanText(extractMetaContent(html, "description"));
   }
 
   function extractAlternativeTitles(html) {
     var block = sliceBetween(
       html,
-      /<div class="font-medium">\s*Alternative titles\s*<\/div>/i,
-      /<div id="expand_button"/i
+      /<div\b[^>]*>\s*Alternative titles\s*<\/div>/i,
+      /<div\b[^>]*\bid=(['"])expand_button\1/i
     );
     var titles = [];
     var seen = {};
@@ -1153,7 +1436,7 @@
     while ((match = spanRegex.exec(block)) !== null) {
       var title = cleanText(match[1]);
       var key = title.toLowerCase();
-      if (title.length === 0 || seen[key]) {
+      if (title.length === 0 || /^no alternative titles?\.?$/i.test(title) || seen[key]) {
         continue;
       }
 
@@ -1164,39 +1447,44 @@
     return titles;
   }
 
-  function extractAlternativeTitlesFromBrowseEntry(browseEntry, primaryTitle) {
-    var raw = cleanText(browseEntry && browseEntry.searchTitle || "");
-    var primary = cleanText(primaryTitle || browseEntry && browseEntry.title || "");
-
-    if (raw.length === 0 || primary.length === 0) {
-      return [];
-    }
-
-    if (raw.toLowerCase().indexOf(primary.toLowerCase()) === 0) {
-      raw = raw.slice(primary.length).replace(/^[\s\-–—:|/,.]+/, "").trim();
-    }
-
-    return splitAlternativeTitles(raw).filter(function(title) {
-      return title.toLowerCase() !== primary.toLowerCase();
-    });
-  }
-
   function extractMetadataValue(html, label) {
-    var pattern = new RegExp(
-      "<span>\\s*" + escapeRegex(label) + "\\s*<\\/span>[\\s\\S]*?<div[^>]*class=\"[^\"]*min-h-8[^\"]*\"[^>]*>\\s*([\\s\\S]*?)\\s*<\\/div>",
-      "i"
-    );
-    return cleanText(extractMatch(html, pattern, 1));
+    var value = String(html || "");
+    var labelPattern = new RegExp("<span\\b[^>]*>\\s*" + escapeRegex(label) + "\\s*<\\/span>", "i");
+    var labelMatch = labelPattern.exec(value);
+    if (!labelMatch) {
+      return "";
+    }
+
+    var tail = value.slice(labelMatch.index + labelMatch[0].length);
+    var divRegex = /<div\b[^>]*>/gi;
+    var match;
+
+    while ((match = divRegex.exec(tail)) !== null) {
+      if (!hasHtmlClass(match[0], "min-h-8")) {
+        continue;
+      }
+
+      var end = tail.toLowerCase().indexOf("</div>", divRegex.lastIndex);
+      return cleanText(end >= 0 ? tail.slice(divRegex.lastIndex, end) : tail.slice(divRegex.lastIndex));
+    }
+
+    return "";
   }
 
   function extractDetailGenres(html) {
     var genres = [];
     var seen = {};
-    var regex = /<a[^>]*href="\/series\/\?genre=[^"]+"[^>]*title="([^"]+)"[^>]*>/gi;
+    var regex = /<a\b[^>]*>/gi;
     var match;
 
     while ((match = regex.exec(String(html || ""))) !== null) {
-      var normalized = createGenreOption(match[1]);
+      var tag = match[0];
+      var href = decodeEntities(extractHtmlAttribute(tag, "href"));
+      if (!/^\/series\/?\?genre=/i.test(href)) {
+        continue;
+      }
+
+      var normalized = createGenreOption(extractHtmlAttribute(tag, "title") || extractHtmlAttribute(tag, "alt") || extractQueryParameter(href, "genre"));
       if (!normalized || seen[normalized.id]) {
         continue;
       }
@@ -1206,23 +1494,6 @@
     }
 
     return genres;
-  }
-
-  function mergeGenreEntries(primaryGenres, fallbackGenres) {
-    var merged = [];
-    var seen = {};
-
-    (Array.isArray(primaryGenres) ? primaryGenres : []).concat(Array.isArray(fallbackGenres) ? fallbackGenres : []).forEach(function(genre) {
-      var normalized = createGenreOption(genre);
-      if (!normalized || seen[normalized.id]) {
-        return;
-      }
-
-      seen[normalized.id] = true;
-      merged.push(normalized);
-    });
-
-    return merged;
   }
 
   function buildDetailTagSections(details) {
@@ -1255,6 +1526,12 @@
       }));
     }
 
+    addDetailMetadataTag(metadataTags, "published", "Published", formatDateMetadata(details && details.publishedAt));
+    addDetailMetadataTag(metadataTags, "updated", "Updated", formatDateMetadata(details && details.updatedAt));
+    if (toNumber(details && details.chapterCount, 0) > 0) {
+      addDetailMetadataTag(metadataTags, "chapters", "Chapters", String(Math.floor(toNumber(details.chapterCount, 0))));
+    }
+
     if (genreTags.length > 0) {
       sections.push(App.createTagSection({
         id: "genres",
@@ -1272,6 +1549,28 @@
     }
 
     return sections;
+  }
+
+  function addDetailMetadataTag(tags, id, label, value) {
+    var clean = cleanText(value);
+    if (clean.length === 0) {
+      return;
+    }
+
+    tags.push(App.createTag({
+      id: "metadata:" + id + ":" + normalizeOptionId(clean),
+      label: label + ": " + clean
+    }));
+  }
+
+  function formatDateMetadata(value) {
+    var raw = cleanText(value);
+    if (raw.length === 0) {
+      return "";
+    }
+
+    var parsed = new Date(raw);
+    return isNaN(parsed.getTime()) ? raw : parsed.toISOString().slice(0, 10);
   }
 
   function buildTitles(primaryTitle, alternativeTitles) {
@@ -1319,12 +1618,25 @@
   function parseChapterEntries(html) {
     var entries = [];
     var seen = {};
-    var regex = /<a\b[^>]*href="(\/chapter\/[^"]+\/?)"[^>]*(?:\bp="[^"]*"|\bd="[^"]*"|\bc="[^"]*")[^>]*>[\s\S]*?<\/a>/gi;
+    var chapterListHtml = extractElementHtmlById(html, "div", "chapters");
+    if (chapterListHtml.length === 0) {
+      if (containsChapterLinks(html)) {
+        throw new Error("GenzToon chapter-list markup changed and could not be parsed safely.");
+      }
+      return entries;
+    }
+    var regex = /<a\b[^>]*>[\s\S]*?<\/a>/gi;
     var match;
 
-    while ((match = regex.exec(String(html || ""))) !== null) {
+    while ((match = regex.exec(chapterListHtml)) !== null) {
       var block = match[0];
-      var chapterId = extractLastPathComponent(normalizeUrl(match[1]));
+      var openTag = extractOpeningTag(block);
+      var href = extractHtmlAttribute(openTag, "href");
+      if (!isChapterHref(href)) {
+        continue;
+      }
+
+      var chapterId = extractLastPathComponent(normalizeUrl(href));
       if (chapterId.length === 0 || seen[chapterId]) {
         continue;
       }
@@ -1339,6 +1651,7 @@
         label: label,
         number: chapterNumber,
         isLocked: isLockedChapterEntryHtml(block),
+        coinCost: toNumber(extractHtmlAttribute(block, "c"), 0),
         date: parseDate(extractHtmlAttribute(block, "d"))
       });
     }
@@ -1379,7 +1692,7 @@
   }
 
   function buildPageImageUrl(uid) {
-    return "https://cdn.meowing.org/uploads/" + encodeURIComponent(cleanText(uid));
+    return buildUploadUrl(uid);
   }
 
   function extractChapterNumber(value) {
@@ -1412,7 +1725,9 @@
   }
 
   function buildChapterPreviewSubtitle(entry) {
-    return buildChapterListName(entry, extractChapterNumber(entry && entry.label));
+    var label = buildChapterListName(entry, extractChapterNumber(entry && entry.label));
+    var dateLabel = cleanText(entry && entry.dateLabel);
+    return dateLabel.length > 0 ? label + " • " + dateLabel : label;
   }
 
   function buildChapterListName(entry, fallbackNumber) {
@@ -1428,7 +1743,9 @@
   }
 
   function buildLockedChapterLabel(entry, fallbackNumber) {
-    return LOCKED_CHAPTER_LABEL_PREFIX + buildReadableChapterLabel(entry, fallbackNumber);
+    var label = LOCKED_CHAPTER_LABEL_PREFIX + buildReadableChapterLabel(entry, fallbackNumber);
+    var coinCost = Math.floor(toNumber(entry && entry.coinCost, 0));
+    return coinCost > 0 ? label + " · " + coinCost + (coinCost === 1 ? " coin" : " coins") : label;
   }
 
   function normalizeChapterLabel(value) {
@@ -1475,6 +1792,192 @@
   }
 
   // Generic Utilities
+
+  function extractBlocksByClass(html, tagName, className) {
+    var value = String(html || "");
+    var tagRegex = new RegExp("<" + escapeRegex(tagName) + "\\b[^>]*>", "gi");
+    var starts = [];
+    var match;
+
+    while ((match = tagRegex.exec(value)) !== null) {
+      if (hasHtmlClass(match[0], className)) {
+        starts.push(match.index);
+      }
+    }
+
+    return starts.map(function(start, index) {
+      var end = index + 1 < starts.length ? starts[index + 1] : value.length;
+      return value.slice(start, end);
+    });
+  }
+
+  function extractElementHtmlByClass(html, tagName, className) {
+    var value = String(html || "");
+    var openTagRegex = new RegExp("<" + escapeRegex(tagName) + "\\b[^>]*>", "gi");
+    var match;
+
+    while ((match = openTagRegex.exec(value)) !== null) {
+      if (!hasHtmlClass(match[0], className)) {
+        continue;
+      }
+
+      var closingTag = "</" + tagName + ">";
+      var end = value.toLowerCase().indexOf(closingTag.toLowerCase(), openTagRegex.lastIndex);
+      return end >= 0 ? value.slice(match.index, end + closingTag.length) : value.slice(match.index);
+    }
+
+    return "";
+  }
+
+  function extractElementHtmlById(html, tagName, id) {
+    var value = String(html || "");
+    var tagRegex = new RegExp("<\\/?" + escapeRegex(tagName) + "\\b[^>]*>", "gi");
+    var expectedId = cleanText(id);
+    var start = -1;
+    var depth = 0;
+    var match;
+
+    while ((match = tagRegex.exec(value)) !== null) {
+      var tag = match[0];
+      var isClosing = /^<\//.test(tag);
+
+      if (start < 0) {
+        if (!isClosing && cleanText(extractHtmlAttribute(tag, "id")) === expectedId) {
+          start = match.index;
+          depth = 1;
+        }
+        continue;
+      }
+
+      if (isClosing) {
+        depth -= 1;
+        if (depth === 0) {
+          return value.slice(start, tagRegex.lastIndex);
+        }
+      } else if (!/\/>\s*$/.test(tag)) {
+        depth += 1;
+      }
+    }
+
+    return start >= 0 ? value.slice(start) : "";
+  }
+
+  function extractFirstSeriesAnchorTag(html) {
+    var regex = /<a\b[^>]*>/gi;
+    var match;
+
+    while ((match = regex.exec(String(html || ""))) !== null) {
+      if (extractSeriesId(normalizeUrl(extractHtmlAttribute(match[0], "href"))).length > 0) {
+        return match[0];
+      }
+    }
+
+    return "";
+  }
+
+  function extractFirstChapterAnchorTag(html) {
+    var regex = /<a\b[^>]*>/gi;
+    var match;
+
+    while ((match = regex.exec(String(html || ""))) !== null) {
+      if (isChapterHref(extractHtmlAttribute(match[0], "href"))) {
+        return match[0];
+      }
+    }
+
+    return "";
+  }
+
+  function extractSeriesDatabaseIdFromChapterHref(value) {
+    var chapterId = extractLastPathComponent(normalizeUrl(value));
+    var separatorIndex = chapterId.indexOf("-");
+    return separatorIndex > 0 ? chapterId.slice(0, separatorIndex) : "";
+  }
+
+  function isChapterHref(value) {
+    var href = cleanText(value);
+    return /^\/chapter\//i.test(href) || href.indexOf(DOMAIN + "/chapter/") === 0;
+  }
+
+  function containsChapterLinks(html) {
+    var regex = /<a\b[^>]*>/gi;
+    var match;
+
+    while ((match = regex.exec(String(html || ""))) !== null) {
+      if (isChapterHref(extractHtmlAttribute(match[0], "href"))) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  function extractQueryParameter(value, key) {
+    var pattern = new RegExp("(?:[?&])" + escapeRegex(key) + "=([^&#]*)", "i");
+    var match = String(value || "").match(pattern);
+    if (!match) {
+      return "";
+    }
+
+    try {
+      return decodeURIComponent(match[1].replace(/\+/g, " "));
+    } catch (_) {
+      return match[1];
+    }
+  }
+
+  function hasHtmlClass(html, className) {
+    var expected = cleanText(className).toLowerCase();
+    if (expected.length === 0) {
+      return false;
+    }
+
+    return String(extractHtmlAttribute(extractOpeningTag(html), "class") || "").split(/\s+/).some(function(value) {
+      return value.toLowerCase() === expected;
+    });
+  }
+
+  function extractOpeningTag(html) {
+    var match = String(html || "").match(/^\s*<[^>]+>/);
+    return match ? match[0] : "";
+  }
+
+  function containsSeriesLinks(html) {
+    return /<a\b[^>]*\bhref=(['"])\/series\/[^?\/#'"]+\/?\1/i.test(String(html || ""));
+  }
+
+  function extractMetaContent(html, propertyName) {
+    var regex = /<meta\b[^>]*>/gi;
+    var match;
+    var expected = cleanText(propertyName).toLowerCase();
+
+    while ((match = regex.exec(String(html || ""))) !== null) {
+      var tag = match[0];
+      var property = extractHtmlAttribute(tag, "property") || extractHtmlAttribute(tag, "name");
+      if (cleanText(property).toLowerCase() === expected) {
+        return extractHtmlAttribute(tag, "content");
+      }
+    }
+
+    return "";
+  }
+
+  function touchCacheKey(order, key) {
+    var index = order.indexOf(key);
+    if (index >= 0) {
+      order.splice(index, 1);
+    }
+    order.push(key);
+  }
+
+  function storeBoundedCacheEntry(cache, order, key, value, limit) {
+    cache[key] = value;
+    touchCacheKey(order, key);
+
+    while (order.length > limit) {
+      delete cache[order.shift()];
+    }
+  }
 
   function extractHtmlAttribute(html, attributeName) {
     var pattern = new RegExp("\\b" + escapeRegex(attributeName) + "=(['\"])([\\s\\S]*?)\\1", "i");
@@ -1681,6 +2184,11 @@
       return DOMAIN + url;
     }
     return DOMAIN + "/" + url.replace(/^\/+/, "");
+  }
+
+  function buildUploadUrl(value) {
+    var uid = cleanText(value);
+    return uid.length > 0 ? "https://cdn.meowing.org/uploads/" + encodeURIComponent(uid) : "";
   }
 
   function extractLastPathComponent(url) {
