@@ -228,7 +228,7 @@
   // Source Info
 
   var ComixToInfo = {
-    version: "1.1.1",
+    version: "1.1.2",
     name: "ComixTo",
     description: "Extension that pulls series from " + DOMAIN,
     author: "real",
@@ -2350,7 +2350,9 @@
       return true;
     }
 
-    return /^https:\/\/static\.comix\.to(?:\/|$)/i.test(value);
+    // Reader pages can come from external image CDNs with extensionless paths.
+    // Those hosts reject API headers such as Origin, Referer, and X-Requested-With.
+    return /^https?:\/\//i.test(value) && !/^https?:\/\/(?:www\.)?comix\.to(?::\d+)?(?:\/|$)/i.test(value);
   }
 
   async function processComixImageResponse(response) {
@@ -2770,7 +2772,8 @@
       text.indexOf("checking your browser") >= 0 ||
       text.indexOf("verify you are human") >= 0 ||
       text.indexOf("please enable cookies") >= 0 ||
-      text.indexOf("challenge-platform") >= 0 ||
+      // Cloudflare injects challenge-platform scripts into normal HTML pages.
+      // A script URL alone is not evidence of an interstitial challenge.
       text.indexOf("cf_chl_opt") >= 0 ||
       text.indexOf("captcha") >= 0 ||
       text.indexOf("cf-error-code") >= 0;
