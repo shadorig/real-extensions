@@ -3,17 +3,19 @@
 (function() {
   // Constants
 
-  var DOMAIN = "https://qimanhwa.com";
-  var API_BASE = "https://api.qimanhwa.com/api/v1";
+  var DOMAIN = "https://qimanga.com";
+  var API_BASE = "https://api.qimanga.com/api/v1";
   var SOURCE_INTENTS_SERIES_CHAPTERS = 1;
   var SOURCE_INTENTS_HOMEPAGE_SECTIONS = 4;
   var SOURCE_INTENTS_CLOUDFLARE_BYPASS_REQUIRED = 16;
   var SOURCE_INTENTS_SETTINGS_UI = 32;
   var CONTENT_RATING_MATURE = "MATURE";
   var CHAPTERS_PER_PAGE = 100;
-  var BROWSE_PER_PAGE = 100;
+  var FILTERED_SEARCH_PER_PAGE = 100;
   var SEARCH_PER_PAGE = 24;
   var HOME_LATEST_PER_PAGE = 24;
+  var SEARCH_CACHE_LIFETIME_MS = 120000;
+  var PAGE_FETCH_BATCH_SIZE = 4;
   var SECTION_ID_FEATURED = "featured";
   var SECTION_ID_PINNED = "pinned_series";
   var SECTION_ID_POPULAR = "popular";
@@ -33,7 +35,9 @@
     { id: "ONGOING", label: "Ongoing" },
     { id: "COMPLETED", label: "Completed" },
     { id: "HIATUS", label: "Hiatus" },
-    { id: "DROPPED", label: "Dropped" }
+    { id: "DROPPED", label: "Dropped" },
+    { id: "CANCELLED", label: "Cancelled" },
+    { id: "MASS_RELEASED", label: "Mass Released" }
   ];
   var SEARCH_TYPE_OPTIONS = [
     { id: "MANGA", label: "Manga" },
@@ -54,7 +58,7 @@
   // Source Info
 
   var QiScansInfo = {
-    version: "1.0.0",
+    version: "1.1.0",
     name: "QiScans",
     description: "Extension that pulls series from " + DOMAIN,
     author: "real",
@@ -75,7 +79,7 @@
     this.stateManager = App.createSourceStateManager();
     this.cachedGenres = null;
     this.cachedGenreTagLookup = null;
-    this.cachedAlphabeticalBrowse = null;
+    this.cachedBrowseCorpus = null;
   }
 
   // Paperback Interface Methods
@@ -221,25 +225,34 @@
     }
 
     if (description.length === 0 || hasSynopsisUiControls(rawDescription) || tagSections.length === 0) {
-      var detailHtml = await this.fetchText(this.getMangaShareUrl(seriesId));
-      var htmlDescription = extractSynopsisFromHtml(detailHtml);
-      var htmlGenres = extractHtmlGenres(detailHtml);
+      try {
+        var detailHtml = await this.fetchText(this.getMangaShareUrl(seriesId));
+        var htmlDescription = extractSynopsisFromHtml(detailHtml);
+        var htmlGenres = extractHtmlGenres(detailHtml);
 
-      if (shouldUseHtmlSynopsis(description, htmlDescription, rawDescription)) {
-        description = htmlDescription;
-      }
-
-      if (tagSections.length === 0 && htmlGenres.length > 0) {
-        var htmlGenreSections = buildDetailTagSections({
-          genres: htmlGenres
-        });
-        if (requiresGenreTagLookup(htmlGenres)) {
-          htmlGenreSections = buildDetailTagSections({
-            genres: htmlGenres
-          }, await this.getGenreTagLookup());
+        if (shouldUseHtmlSynopsis(description, htmlDescription, rawDescription)) {
+          description = htmlDescription;
         }
-        tagSections = htmlGenreSections;
+
+        if (tagSections.length === 0 && htmlGenres.length > 0) {
+          var htmlGenreSections = buildDetailTagSections({
+            genres: htmlGenres
+          });
+          if (requiresGenreTagLookup(htmlGenres)) {
+            htmlGenreSections = buildDetailTagSections({
+              genres: htmlGenres
+            }, await this.getGenreTagLookup());
+          }
+          tagSections = htmlGenreSections;
+        }
+      } catch (_) {
+        // The API details are usable even if the optional HTML fallback fails.
       }
+    }
+
+    var releaseInfo = buildReleaseInfo(details);
+    if (releaseInfo.length > 0) {
+      description = description.length > 0 ? description + "\n\n" + releaseInfo : releaseInfo;
     }
 
     return App.createSourceManga({
@@ -269,14 +282,16 @@
     var chapterPages = [firstPage];
 
     if (totalPages > 1) {
-      var pendingPages = [];
-      for (var page = 2; page <= totalPages; page += 1) {
-        pendingPages.push(this.fetchJson(API_BASE + "/series/" + seriesSlug + "/chapters" + buildQueryString({
-          page: page,
-          perPage: CHAPTERS_PER_PAGE
-        })));
+      for (var nextPage = 2; nextPage <= totalPages; nextPage += PAGE_FETCH_BATCH_SIZE) {
+        var pendingPages = [];
+        for (var page = nextPage; page <= totalPages && page < nextPage + PAGE_FETCH_BATCH_SIZE; page += 1) {
+          pendingPages.push(this.fetchJson(API_BASE + "/series/" + seriesSlug + "/chapters" + buildQueryString({
+            page: page,
+            perPage: CHAPTERS_PER_PAGE
+          })));
+        }
+        chapterPages = chapterPages.concat(await Promise.all(pendingPages));
       }
-      chapterPages = chapterPages.concat(await Promise.all(pendingPages));
     }
 
     var visibleChapters = [];
@@ -299,13 +314,18 @@
 
     return visibleChapters.map(function(chapter, index) {
       var number = toChapterNumber(chapter && chapter.number, visibleChapters.length - index);
-      return App.createChapter({
+      var result = {
         id: String(chapter.slug),
         name: buildChapterListName(chapter, number),
         chapNum: number,
-        time: chapter.createdAt ? new Date(chapter.createdAt) : new Date(),
         langCode: "en"
-      });
+      };
+      // The site shows the free-release date when a paid chapter unlocks.
+      var availableAt = parseOptionalDate(chapter.becameFreeAt || chapter.createdAt);
+      if (availableAt) {
+        result.time = availableAt;
+      }
+      return App.createChapter(result);
     });
   };
 
@@ -339,7 +359,7 @@
   };
 
   QiScans.prototype.getSearchResults = async function(query, metadata) {
-    var page = metadata && metadata.page ? metadata.page : 1;
+    var page = toPositiveInteger(metadata && metadata.page, 1);
     var title = query && typeof query.title === "string" ? query.title.trim() : "";
     var filters = extractSearchFilters(query);
     var resultsPage;
@@ -350,19 +370,22 @@
       });
     }
 
+    if (title.length >= 2 && hasBrowseFilters(filters)) {
+      return this.getFilteredTitleResults(title, filters, page);
+    }
+
     if (title.length >= 2) {
       resultsPage = await this.fetchJson(API_BASE + "/series/search" + buildQueryString({
         q: title,
         page: page,
         perPage: SEARCH_PER_PAGE
       }));
-    } else if (filters.sort === "alphabetical") {
-      return this.getAlphabeticalBrowseResults(filters, page);
     } else {
       resultsPage = await this.fetchJson(API_BASE + "/series" + buildQueryString({
         page: page,
         perPage: SEARCH_PER_PAGE,
-        genre: filters.genre,
+        genre: filters.genres.length === 1 ? filters.genres[0] : void 0,
+        genres: filters.genres.length > 1 ? filters.genres.join(",") : void 0,
         status: filters.status,
         sort: filters.sort || "latest",
         type: filters.type
@@ -382,74 +405,70 @@
 
   // Source-Specific Fetch Helpers
 
-  QiScans.prototype.getAlphabeticalBrowseResults = async function(filters, page) {
-    var cacheKey = JSON.stringify({
-      genre: filters.genre || "",
-      status: filters.status || "",
-      type: filters.type || "",
-      sort: "alphabetical"
-    });
-    var allItems;
+  QiScans.prototype.getFilteredTitleResults = async function(title, filters, page) {
+    // The keyword endpoint rejects genre, status, type, and sort parameters.
+    // Search the site's filtered catalogue so combined searches stay accurate.
+    var cacheKey = JSON.stringify(filters);
+    var now = Date.now();
+    var catalogue;
 
-    if (this.cachedAlphabeticalBrowse && this.cachedAlphabeticalBrowse.key === cacheKey) {
-      allItems = this.cachedAlphabeticalBrowse.items;
+    if (this.cachedBrowseCorpus && this.cachedBrowseCorpus.key === cacheKey &&
+        now - this.cachedBrowseCorpus.createdAt < SEARCH_CACHE_LIFETIME_MS) {
+      catalogue = this.cachedBrowseCorpus.entries;
     } else {
-      allItems = await this.fetchAllBrowseItems(filters, "alphabetical");
-      this.cachedAlphabeticalBrowse = {
-        key: cacheKey,
-        items: allItems
-      };
+      catalogue = await this.fetchFilteredCatalogue(filters);
+      this.cachedBrowseCorpus = { key: cacheKey, entries: catalogue, createdAt: Date.now() };
     }
 
-    var start = Math.max(0, (page - 1) * SEARCH_PER_PAGE);
+    var matchingTitle = cleanText(title).toLowerCase();
+    var entries = catalogue.filter(function(item) {
+      return matchesSeriesTitle(item, matchingTitle);
+    });
+    var start = (page - 1) * SEARCH_PER_PAGE;
     var end = start + SEARCH_PER_PAGE;
-    var pageItems = allItems.slice(start, end).map(createPartialSeries);
-
     return App.createPagedResults({
-      results: pageItems,
-      metadata: end < allItems.length ? { page: page + 1 } : void 0
+      results: entries.slice(start, end).map(createPartialSeries),
+      metadata: end < entries.length ? { page: page + 1 } : void 0
     });
   };
 
-  QiScans.prototype.fetchAllBrowseItems = async function(filters, sort) {
-    var firstPage = await this.fetchJson(API_BASE + "/series" + buildQueryString({
-      page: 1,
-      perPage: BROWSE_PER_PAGE,
-      genre: filters.genre,
+  QiScans.prototype.fetchFilteredCatalogue = async function(filters) {
+    var url = API_BASE + "/series";
+    var params = {
+      perPage: FILTERED_SEARCH_PER_PAGE,
+      genre: filters.genres.length === 1 ? filters.genres[0] : void 0,
+      genres: filters.genres.length > 1 ? filters.genres.join(",") : void 0,
       status: filters.status,
-      sort: sort,
-      type: filters.type
-    }));
+      type: filters.type,
+      sort: filters.sort || "latest"
+    };
+    var firstPage = await this.fetchJson(url + buildQueryString(Object.assign({ page: 1 }, params)));
     var totalPages = getTotalPageCount(firstPage);
-    var browsePages = [firstPage];
+    var entries = [];
+    var seen = {};
 
-    if (totalPages > 1) {
-      var pendingPages = [];
-      for (var page = 2; page <= totalPages; page += 1) {
-        pendingPages.push(this.fetchJson(API_BASE + "/series" + buildQueryString({
-          page: page,
-          perPage: BROWSE_PER_PAGE,
-          genre: filters.genre,
-          status: filters.status,
-          sort: sort,
-          type: filters.type
-        })));
-      }
-      browsePages = browsePages.concat(await Promise.all(pendingPages));
+    function appendPage(response) {
+      (Array.isArray(response && response.data) ? response.data : []).forEach(function(item) {
+        if (!isComicSeries(item) || !matchesSeriesFilters(item, filters)) {
+          return;
+        }
+        if (seen[item.slug]) {
+          return;
+        }
+        seen[item.slug] = true;
+        entries.push(item);
+      });
     }
 
-    var allItems = [];
-    browsePages.forEach(function(resultsPage) {
-      var items = Array.isArray(resultsPage.data) ? resultsPage.data : [];
-      items.forEach(function(item) {
-        if (isComicSeries(item) && matchesSeriesFilters(item, filters)) {
-          allItems.push(item);
-        }
-      });
-    });
-
-    allItems.sort(compareAlphabeticalSeries);
-    return allItems;
+    appendPage(firstPage);
+    for (var nextPage = 2; nextPage <= totalPages; nextPage += PAGE_FETCH_BATCH_SIZE) {
+      var requests = [];
+      for (var page = nextPage; page <= totalPages && page < nextPage + PAGE_FETCH_BATCH_SIZE; page += 1) {
+        requests.push(this.fetchJson(url + buildQueryString(Object.assign({ page: page }, params))));
+      }
+      (await Promise.all(requests)).forEach(appendPage);
+    }
+    return entries;
   };
 
   QiScans.prototype.getLatestSectionItems = async function(page) {
@@ -633,7 +652,9 @@
 
     var latestChapter = findFirstChapterPreview(item && item.chapters);
     if (latestChapter) {
-      return buildChapterListName(latestChapter, toChapterNumber(latestChapter.number, 0));
+      var subtitle = buildChapterListName(latestChapter, toChapterNumber(latestChapter.number, 0));
+      var displayDate = formatChapterDisplayDate(latestChapter.becameFreeAt || latestChapter.createdAt || item.lastChapterAddedAt);
+      return displayDate ? subtitle + " · " + displayDate : subtitle;
     }
 
     var rating = toNumber(item.avgRating, NaN);
@@ -851,7 +872,7 @@
 
   function extractSearchFilters(query) {
     var filters = {
-      genre: void 0,
+      genres: [],
       status: void 0,
       type: void 0,
       sort: void 0
@@ -860,8 +881,11 @@
 
     includedTags.forEach(function(tag) {
       var tagId = String(tag && tag.id || "");
-      if (tagId.indexOf(SEARCH_TAG_PREFIX_GENRE) === 0 && filters.genre === void 0) {
-        filters.genre = tagId.slice(SEARCH_TAG_PREFIX_GENRE.length);
+      if (tagId.indexOf(SEARCH_TAG_PREFIX_GENRE) === 0) {
+        var genre = tagId.slice(SEARCH_TAG_PREFIX_GENRE.length);
+        if (genre.length > 0 && filters.genres.indexOf(genre) === -1) {
+          filters.genres.push(genre);
+        }
       } else if (tagId.indexOf(SEARCH_TAG_PREFIX_STATUS) === 0 && filters.status === void 0) {
         filters.status = tagId.slice(SEARCH_TAG_PREFIX_STATUS.length);
       } else if (tagId.indexOf(SEARCH_TAG_PREFIX_TYPE) === 0 && filters.type === void 0) {
@@ -872,6 +896,16 @@
     });
 
     return filters;
+  }
+
+  function hasBrowseFilters(filters) {
+    return !!(filters.genres.length || filters.status || filters.type || filters.sort);
+  }
+
+  function matchesSeriesTitle(item, title) {
+    return [item.title, item.alternativeTitles].some(function(value) {
+      return cleanText(value).toLowerCase().indexOf(title) !== -1;
+    });
   }
 
   function matchesSeriesFilters(item, filters) {
@@ -888,24 +922,6 @@
     }
 
     return true;
-  }
-
-  function compareAlphabeticalSeries(left, right) {
-    var leftTitle = normalizeSortableTitle(left && left.title);
-    var rightTitle = normalizeSortableTitle(right && right.title);
-
-    if (leftTitle < rightTitle) return -1;
-    if (leftTitle > rightTitle) return 1;
-
-    var leftSlug = String(left && left.slug || "");
-    var rightSlug = String(right && right.slug || "");
-    if (leftSlug < rightSlug) return -1;
-    if (leftSlug > rightSlug) return 1;
-    return 0;
-  }
-
-  function normalizeSortableTitle(value) {
-    return cleanText(value || "").toLowerCase();
   }
 
   // Detail Helpers
@@ -1169,14 +1185,27 @@
     return "UNKNOWN";
   }
 
-  // Chapter Helpers
+  function buildReleaseInfo(details) {
+    var lines = [];
+    var releaseDate = formatChapterDisplayDate(details && details.releaseDate);
+    if (releaseDate) {
+      lines.push("Released: " + releaseDate);
+    }
 
-  function isChapterPayload(item) {
-    return isObject(item) &&
-      typeof item.slug === "string" &&
-      "number" in item &&
-      "createdAt" in item;
+    var days = [];
+    (Array.isArray(details && details.releaseDays) ? details.releaseDays : []).forEach(function(day) {
+      var label = formatStatusLabel(day);
+      if (label.length > 0 && days.indexOf(label) === -1) {
+        days.push(label);
+      }
+    });
+    if (days.length > 0) {
+      lines.push("Release days: " + days.join(", "));
+    }
+    return lines.join("\n");
   }
+
+  // Chapter Helpers
 
   function isDisplayChapter(item) {
     return isObject(item) &&
@@ -1209,7 +1238,10 @@
 
   function findFirstChapterPreview(chapters) {
     var previewChapters = normalizePreviewChapters(chapters).sort(compareChapterEntriesDesc);
-    return previewChapters.length > 0 ? previewChapters[0] : null;
+    var readable = previewChapters.filter(function(chapter) {
+      return getChapterAccessState(chapter) === CHAPTER_ACCESS_READABLE;
+    });
+    return readable.length > 0 ? readable[0] : previewChapters.length > 0 ? previewChapters[0] : null;
   }
 
   function normalizePreviewChapters(chapters) {
@@ -1259,6 +1291,15 @@
     return isFinite(timestamp) ? timestamp : 0;
   }
 
+  function formatChapterDisplayDate(value) {
+    var date = parseOptionalDate(value);
+    if (!date) {
+      return "";
+    }
+    var months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    return months[date.getUTCMonth()] + " " + date.getUTCDate() + ", " + date.getUTCFullYear();
+  }
+
   async function getShowLockedChapters(stateManager) {
     var stored = await stateManager.retrieve(STATE_SHOW_LOCKED_CHAPTERS);
     return stored === true;
@@ -1273,7 +1314,12 @@
       return CHAPTER_ACCESS_LOCKED;
     }
 
-    var price = toNumber(chapter.price, NaN);
+    if (chapter.requiresPurchase === false || chapter.isFree === true) {
+      return CHAPTER_ACCESS_READABLE;
+    }
+
+    var rawPrice = chapter.price;
+    var price = rawPrice === null || rawPrice === void 0 || rawPrice === "" ? NaN : toNumber(rawPrice, NaN);
     if (isFinite(price)) {
       if (price > 0) {
         return CHAPTER_ACCESS_LOCKED;
@@ -1283,15 +1329,11 @@
       }
     }
 
-    if (chapter.requiresPurchase === false || chapter.isFree === true) {
-      return CHAPTER_ACCESS_READABLE;
-    }
-
     return CHAPTER_ACCESS_UNKNOWN;
   }
 
   function shouldIncludeChapterForList(chapter, showLockedChapters) {
-    if (!isChapterPayload(chapter)) {
+    if (!isDisplayChapter(chapter)) {
       return false;
     }
 
@@ -1396,6 +1438,19 @@
     }
 
     return toNumber(value, fallback);
+  }
+
+  function toPositiveInteger(value, fallback) {
+    var number = Number(value);
+    return isFinite(number) && number > 0 ? Math.floor(number) : fallback;
+  }
+
+  function parseOptionalDate(value) {
+    if (!value) {
+      return null;
+    }
+    var date = new Date(value);
+    return isNaN(date.getTime()) ? null : date;
   }
 
   function getTotalPageCount(resultsPage) {
