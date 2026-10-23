@@ -1,0 +1,54 @@
+name: ComixTo public health
+
+on:
+  schedule:
+    # Daily at a quiet minute (UTC), independent of runner timezone.
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: comixto-health-monitor
+  cancel-in-progress: false
+
+jobs:
+  public-check:
+    name: Homepage and metadata availability
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        id: checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Run public probes
+        id: health
+        run: node scripts/check-comixto-health.cjs --output-dir "$RUNNER_TEMP/comixto-health"
+
+      - name: Create or update incident issue
+        if: always() && steps.checkout.outcome == 'success'
+        uses: actions/github-script@v7
+        env:
+          COMIXTO_REPORT_DIR: ${{ runner.temp }}/comixto-health
+          COMIXTO_PROBE_OUTCOME: ${{ steps.health.outcome }}
+        with:
+          script: |
+            const reportIssue = require('./scripts/report-comixto-health-issue.cjs')
+            await reportIssue({ github, context, core })
+
+      - name: Upload diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: comixto-health-diagnostics
+          path: ${{ runner.temp }}/comixto-health/
+          retention-days: 14
+          if-no-files-found: warn

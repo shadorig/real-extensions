@@ -15,7 +15,7 @@
   var HOME_PAGE_SIZE = 20;
   var SEARCH_PAGE_SIZE = 20;
   var CHAPTERS_PAGE_SIZE = 100;
-  var CHAPTER_PAGE_BATCH_SIZE = 4;
+  var CHAPTER_PAGE_BATCH_SIZE = 1;
   var MAX_CHAPTER_PAGES = 200;
   var TAG_ID_CACHE_SIZE = 50;
   var TAG_ID_CACHE_TTL_MS = 30 * 60 * 1000;
@@ -27,6 +27,8 @@
   var PERSISTED_FILTER_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
   var FALLBACK_FILTER_CACHE_TTL_MS = 2 * 60 * 1000;
   var HOME_HTML_CACHE_TTL_MS = 5 * 60 * 1000;
+  var LIVE_PROTOCOL_TTL_MS = 60 * 60 * 1000;
+  var UNSUPPORTED_PROTOCOL_TTL_MS = 5 * 60 * 1000;
   var TOP_SECTION_PAGE_SIZE = 50;
   var TRANSIENT_HTTP_STATUSES = { 502: true, 503: true, 522: true, 523: true };
   var SECTION_ID_FEATURED = "featured";
@@ -228,7 +230,7 @@
   // Source Info
 
   var ComixToInfo = {
-    version: "1.1.2",
+    version: "1.1.3",
     name: "ComixTo",
     description: "Extension that pulls series from " + DOMAIN,
     author: "real",
@@ -259,10 +261,13 @@
     this.homeHtmlGeneration = 0;
     this.cachedLiveProtocol = null;
     this.cachedLiveProtocolPromise = null;
+    this.cachedLiveProtocolExpiresAt = 0;
+    this.cachedLiveProtocolError = null;
+    this.cachedLiveProtocolErrorExpiresAt = 0;
     this.liveProtocolGeneration = 0;
     this.stateManager = App.createSourceStateManager();
     this.requestManager = App.createRequestManager({
-      requestsPerSecond: 4,
+      requestsPerSecond: 1,
       requestTimeout: 20000,
       interceptor: {
         interceptRequest: async function(request) {
@@ -1640,11 +1645,14 @@
   };
 
   ComixTo.prototype.getLiveProtocol = async function() {
-    if (this.cachedLiveProtocol) {
+    if (this.cachedLiveProtocol && this.cachedLiveProtocolExpiresAt > Date.now()) {
       return this.cachedLiveProtocol;
     }
     if (this.cachedLiveProtocolPromise) {
       return this.cachedLiveProtocolPromise;
+    }
+    if (this.cachedLiveProtocolError && this.cachedLiveProtocolErrorExpiresAt > Date.now()) {
+      throw this.cachedLiveProtocolError;
     }
 
     var generation = this.liveProtocolGeneration;
@@ -1658,8 +1666,17 @@
       }
       if (generation === this.liveProtocolGeneration && this.cachedLiveProtocolPromise === localPromise) {
         this.cachedLiveProtocol = protocol;
+        this.cachedLiveProtocolExpiresAt = Date.now() + LIVE_PROTOCOL_TTL_MS;
+        this.cachedLiveProtocolError = null;
+        this.cachedLiveProtocolErrorExpiresAt = 0;
       }
       return protocol;
+    } catch (error) {
+      if (generation === this.liveProtocolGeneration && /did not expose a usable request signer/.test(String(error))) {
+        this.cachedLiveProtocolError = error;
+        this.cachedLiveProtocolErrorExpiresAt = Date.now() + UNSUPPORTED_PROTOCOL_TTL_MS;
+      }
+      throw error;
     } finally {
       if (this.cachedLiveProtocolPromise === localPromise) {
         this.cachedLiveProtocolPromise = null;
@@ -1696,6 +1713,9 @@
     this.homeHtmlGeneration += 1;
     this.cachedLiveProtocol = null;
     this.cachedLiveProtocolPromise = null;
+    this.cachedLiveProtocolExpiresAt = 0;
+    this.cachedLiveProtocolError = null;
+    this.cachedLiveProtocolErrorExpiresAt = 0;
     this.cachedHomeHtml = null;
     this.cachedHomeHtmlPromise = null;
     this.cachedHomeHtmlExpiresAt = 0;
@@ -1718,6 +1738,7 @@
         }
 
         if (attempt === 0 && shouldRetryResponse(response)) {
+          await waitBeforeComixRetry();
           continue;
         }
 
@@ -1730,6 +1751,7 @@
         if (attempt > 0 || !shouldRetryThrownError(error)) {
           throw error;
         }
+        await waitBeforeComixRetry();
       }
     }
 
@@ -1858,6 +1880,12 @@
       throw new Error("The requested ComixTo page was not found." + buildResponseDiagnosticContext(response));
     }
 
+    if (response.status === 429) {
+      var retryAfter = cleanText(getHeaderIgnoreCase(response.headers, "retry-after") || "");
+      throw new Error("ComixTo is rate limiting requests (HTTP 429). Pause requests and try again later." +
+        (retryAfter.length > 0 && retryAfter.length < 80 ? " Retry-After: " + retryAfter + "." : "") + buildResponseDiagnosticContext(response));
+    }
+
     if (isSignerProtectedApiUrl(url) && isSignerRejectedResponse(response)) {
       throw new Error("ComixTo rejected a signer-protected API request with HTTP " + response.status + ". The site may have rotated its request signer and this Paperback source needs a signer refresh." + buildResponseDiagnosticContext(response));
     }
@@ -1883,6 +1911,12 @@
     var message = cleanText(error && error.message || error || "").toLowerCase();
 
     return /(timeout|timed out|network|connection|socket|temporar|econn|reset by peer|connection reset)/i.test(message);
+  }
+
+  async function waitBeforeComixRetry() {
+    if (typeof setTimeout === "function") {
+      await new Promise(function(resolve) { setTimeout(resolve, 1500); });
+    }
   }
 
   function isSignerRejectedResponse(response) {
@@ -1986,6 +2020,10 @@
         }
       });
       source = source.slice(0, exportMatch.index);
+      // Modern secure bundles expose module-scoped bindings, not window globals.
+      source += "\n" + exportedNames.map(function(name) {
+        return "globalThis[" + JSON.stringify(name) + "] = " + name + ";";
+      }).join("\n");
     }
 
     var document = createLiveSandboxProxy("document", {

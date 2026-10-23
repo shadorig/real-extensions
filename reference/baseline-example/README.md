@@ -110,7 +110,7 @@ Production sources in this repo must keep two version locations in sync:
 - `SourceInfo.version` inside `sources/<SourceId>/source.js` is the canonical version to edit.
 - `sources/versioning.json` is the published Paperback repository manifest and must mirror the canonical source version for each source.
 
-This repo needs both locations. Paperback's 0.8 type definitions make `SourceInfo.version` required and describe it as the value the app uses to determine whether the local source should update. Paperback repositories are added through a base URL that hosts `versioning.json`, and the 0.8.7 toolchain generates that manifest by requiring each built `source.js` and copying `${SourceId}Info.version` into the matching manifest entry. This repo stores deployable `source.js` files directly and has no local `package.json`, CI, or `paperback bundle` command, so `versioning.json` is tracked and synchronized manually.
+This repo needs both locations. Paperback's 0.8 type definitions make `SourceInfo.version` required and describe it as the value the app uses to determine whether the local source should update. Paperback repositories are added through a base URL that hosts `versioning.json`, and the 0.8.7 toolchain generates that manifest by requiring each built `source.js` and copying `${SourceId}Info.version` into the matching manifest entry. This repo stores deployable `source.js` files directly and has no local `package.json` or `paperback bundle` command. Its health-check CI does not generate manifests, so `versioning.json` is tracked and synchronized manually.
 
 Use SemVer terms for source changes:
 

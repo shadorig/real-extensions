@@ -9,6 +9,10 @@ reference/baseline-example/*
 !reference/baseline-example/source.js
 scripts/*
 !scripts/check-version-sync.cjs
+!scripts/test-comix-runtime.cjs
+!scripts/check-comixto-health.cjs
+!scripts/check-comixto-health.test.cjs
+!scripts/report-comixto-health-issue.cjs
 .playwright-mcp/
 .tmp-*/
 tmp-*/
